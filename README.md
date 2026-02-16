@@ -41,12 +41,33 @@ build_win.bat
 
 Copy the plugin bundle into your system's VST3 (or AU Components) directory, then rescan in your DAW.
 
-### macOS Gatekeeper
+## macOS Troubleshooting
 
-The release builds are not signed or notarized, so macOS will block them by default. After copying the plugin, remove the quarantine flag:
+The release builds are not signed or notarized, so macOS may block them. After copying the plugin to `/Library/Audio/Plug-Ins/VST3/` (or `~/Library/Audio/Plug-Ins/VST3/`), run these commands:
+
+**1. Remove the quarantine flag:**
 
 ```bash
 xattr -cr "/Library/Audio/Plug-Ins/VST3/NINJAM VST3.vst3"
+```
+
+**2. Ad-hoc sign the plugin:**
+
+On newer macOS versions, unsigned plugins may be silently ignored by DAWs even after removing quarantine. Ad-hoc signing fixes this:
+
+```bash
+codesign --force --deep --sign - "/Library/Audio/Plug-Ins/VST3/NINJAM VST3.vst3"
+```
+
+After both steps, rescan plugins in your DAW.
+
+**3. Verify (optional):**
+
+If the plugin still doesn't appear, check that macOS isn't rejecting it:
+
+```bash
+codesign -v "/Library/Audio/Plug-Ins/VST3/NINJAM VST3.vst3"
+spctl --assess --type exec "/Library/Audio/Plug-Ins/VST3/NINJAM VST3.vst3"
 ```
 
 ## Local Test Server
