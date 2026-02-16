@@ -35,8 +35,6 @@ NinjamClientService::NinjamClientService()
   client.config_savelocalaudio = 0;
   client.config_play_prebuffer = 4096;
   client.config_metronome_mute = false;
-  client.config_metronome_follow_session = true;
-  client.config_session_monitor_latest = false;
   client.SetLocalChannelInfo(0, "Input", true, 0, true, 96, true, true);
   applySessionChannelModeToCore();
   client.SetLocalChannelMonitoring(0, true, 1.0f, true, 0.0f, true, false, true, false);
@@ -295,11 +293,9 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
   if (usePhaseRing)
   {
     client.config_metronome_mute = true;
-    client.config_metronome_follow_session = false;
   }
   else
   {
-    client.config_metronome_follow_session = hasMusicalClock;
     client.config_metronome_mute = !metronomeEnabled;
   }
 
