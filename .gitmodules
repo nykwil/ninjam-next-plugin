@@ -1,0 +1,3 @@
+[submodule "ninjam"]
+	path = ninjam
+	url = https://github.com/justinfrankel/ninjam.git

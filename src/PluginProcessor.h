@@ -1,0 +1,67 @@
+#pragma once
+
+#include <JuceHeader.h>
+#include "NinjamClientService.h"
+
+class NinjamVST3AudioProcessor final : public juce::AudioProcessor
+{
+public:
+  NinjamVST3AudioProcessor();
+  ~NinjamVST3AudioProcessor() override;
+
+  void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+  void releaseResources() override;
+
+  bool isBusesLayoutSupported(const BusesLayout& layouts) const override;
+  void processBlock(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+
+  juce::AudioProcessorEditor* createEditor() override;
+  bool hasEditor() const override;
+
+  const juce::String getName() const override;
+  bool acceptsMidi() const override;
+  bool producesMidi() const override;
+  bool isMidiEffect() const override;
+  double getTailLengthSeconds() const override;
+
+  int getNumPrograms() override;
+  int getCurrentProgram() override;
+  void setCurrentProgram(int index) override;
+  const juce::String getProgramName(int index) override;
+  void changeProgramName(int index, const juce::String& newName) override;
+
+  void getStateInformation(juce::MemoryBlock& destData) override;
+  void setStateInformation(const void* data, int sizeInBytes) override;
+
+  void connectToServer(const juce::String& host, const juce::String& user, const juce::String& password);
+  void disconnectFromServer();
+  void sendUserCommand(const juce::String& commandText);
+  void setMonitorIncomingAudio(bool enabled);
+  bool getMonitorIncomingAudio() const;
+  void setMonitorTxAudio(bool enabled);
+  bool getMonitorTxAudio() const;
+  void setMetronomeEnabled(bool enabled);
+  bool getMetronomeEnabled() const;
+
+  NinjamClientService& getClientService();
+  const NinjamClientService& getClientService() const;
+
+private:
+  void initialiseSettings();
+  void loadCredentialsFromSettings();
+  void saveMonitorIncomingSetting(bool enabled);
+  void saveMonitorTxSetting(bool enabled);
+  void saveMetronomeSetting(bool enabled);
+  NinjamClientService::TransportState buildTransportState(int numSamples);
+
+  juce::ApplicationProperties appProperties;
+  NinjamClientService clientService;
+  double sampleRateHz = 48000.0;
+  double lastHostTimeSeconds = -1.0;
+  double lastHostPpq = 0.0;
+  bool lastHostPpqValid = false;
+  bool lastHostWasPlaying = false;
+  bool autoConnectAttempted = false;
+
+  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NinjamVST3AudioProcessor)
+};

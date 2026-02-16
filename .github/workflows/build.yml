@@ -1,0 +1,27 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --config Release --target NinjamVST3_VST3
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ninjam-next-plugin-${{ matrix.os }}
+          path: build/NinjamVST3_artefacts/*/VST3/
