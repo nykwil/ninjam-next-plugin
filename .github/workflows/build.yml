@@ -3,6 +3,7 @@ name: Build
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -20,8 +21,32 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
       - name: Build
         run: cmake --build build --config Release --target NinjamVST3_VST3
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: cd build/NinjamVST3_artefacts/Release/VST3 && zip -r ../../../../ninjam-next-plugin-macos.zip "NINJAM VST3.vst3"
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: cd build/NinjamVST3_artefacts/Release/VST3 && 7z a ../../../../ninjam-next-plugin-windows.zip "NINJAM VST3.vst3"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ninjam-next-plugin-${{ matrix.os }}
-          path: build/NinjamVST3_artefacts/*/VST3/
+          path: ninjam-next-plugin-*.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: ninjam-next-plugin-*.zip
