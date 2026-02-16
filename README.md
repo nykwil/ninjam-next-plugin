@@ -41,6 +41,14 @@ build_win.bat
 
 Copy the plugin bundle into your system's VST3 (or AU Components) directory, then rescan in your DAW.
 
+### macOS Gatekeeper
+
+The release builds are not signed or notarized, so macOS will block them by default. After copying the plugin, remove the quarantine flag:
+
+```bash
+xattr -cr "/Library/Audio/Plug-Ins/VST3/NINJAM VST3.vst3"
+```
+
 ## Local Test Server
 
 The build also produces a local NINJAM server:
