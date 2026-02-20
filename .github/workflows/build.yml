@@ -20,14 +20,14 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
       - name: Build
-        run: cmake --build build --config Release --target NinjamVST3_VST3
+        run: cmake --build build --config Release --target NinjamNext_VST3
       - name: Package (macOS)
         if: runner.os == 'macOS'
-        run: cd build/NinjamVST3_artefacts/Release/VST3 && zip -r ../../../../ninjam-next-plugin-macos.zip "NINJAM VST3.vst3"
+        run: cd build/NinjamNext_artefacts/Release/VST3 && zip -r ../../../../ninjam-next-plugin-macos.zip "NinjamNext.vst3"
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: bash
-        run: cd build/NinjamVST3_artefacts/Release/VST3 && 7z a ../../../../ninjam-next-plugin-windows.zip "NINJAM VST3.vst3"
+        run: cd build/NinjamNext_artefacts/Release/VST3 && 7z a ../../../../ninjam-next-plugin-windows.zip "NinjamNext.vst3"
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

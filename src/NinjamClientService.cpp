@@ -330,6 +330,15 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
   if (monitorTxAudio)
     txMonitorScratch.applyGain(localGainValue);
 
+  // Measure send level (post-gain input, always reflects what's being sent)
+  {
+    float sendPeak = 0.0f;
+    for (int ch = 0; ch < numChannels; ++ch)
+      sendPeak = juce::jmax(sendPeak, inputScratch.getMagnitude(ch, 0, blockSize));
+    const juce::ScopedLock scopedLock(lock);
+    state.sendMeter = clampMeter(sendPeak);
+  }
+
   if (outputScratch.getNumChannels() != numChannels || outputScratch.getNumSamples() != blockSize)
     outputScratch.setSize(numChannels, blockSize, false, false, true);
   outputScratch.clear();
@@ -585,6 +594,27 @@ void NinjamClientService::setPhaseOffsetMs(float ms)
   state.phaseOffsetMs = juce::jlimit(-500.0f, 500.0f, ms);
 }
 
+void NinjamClientService::setUserChannelMute(int userIdx, int channelIdx, bool mute)
+{
+  client.SetUserChannelState(userIdx, channelIdx,
+                             false, false, false, 0.0f, false, 0.0f,
+                             true, mute, false, false);
+}
+
+void NinjamClientService::setUserChannelSolo(int userIdx, int channelIdx, bool solo)
+{
+  client.SetUserChannelState(userIdx, channelIdx,
+                             false, false, false, 0.0f, false, 0.0f,
+                             false, false, true, solo);
+}
+
+void NinjamClientService::setUserChannelVolume(int userIdx, int channelIdx, float volume)
+{
+  client.SetUserChannelState(userIdx, channelIdx,
+                             false, false, true, juce::jlimit(0.0f, 2.0f, volume),
+                             false, 0.0f, false, false, false, false);
+}
+
 float NinjamClientService::getPhaseOffsetMs() const
 {
   const juce::ScopedLock scopedLock(lock);
@@ -645,7 +675,7 @@ void NinjamClientService::ensureAllRemoteChannelsSubscribed()
       if (!subscribed)
       {
         client.SetUserChannelState(userIdx, chanIdx,
-                                   true, true, false, 0.0f, false, 0.0f,
+                                   true, true, true, 1.0f, false, 0.0f,
                                    false, false, false, false, false, 0);
       }
     }
@@ -721,6 +751,10 @@ void NinjamClientService::refreshStatusFromCore()
   if (bpm > 0) lastServerBpm = bpm;
   if (bpi > 0) lastServerBpi = bpi;
 
+  if (bpm > 0) state.serverBpm = bpm;
+  state.hostBpmValid = lastHostBpmValid;
+  state.hostBpm = lastHostBpmValid ? juce::roundToInt(lastHostBpm) : 0;
+
   if (hostLockedActive && lastHostBpmValid)
     state.bpm = juce::roundToInt(lastHostBpm);
   else if (bpm > 0)
@@ -745,10 +779,50 @@ void NinjamClientService::refreshStatusFromCore()
     lastStatusCode = statusCode;
   }
 
+  // Enumerate remote users and channels
+  state.remoteUsers.clear();
+  if (state.connected)
+  {
+    const int numUsers = client.GetNumUsers();
+    for (int u = 0; u < numUsers; ++u)
+    {
+      const char* userName = client.GetUserState(u);
+      if (userName == nullptr)
+        continue;
+
+      RemoteUser user;
+      user.name = juce::String(userName);
+      user.userIndex = u;
+
+      for (int i = 0;; ++i)
+      {
+        const int chanIdx = client.EnumUserChannels(u, i);
+        if (chanIdx < 0)
+          break;
+
+        bool sub = false, muted = false, solo = false;
+        float vol = 1.0f, pan = 0.0f;
+        const char* chanName = client.GetUserChannelState(u, chanIdx, &sub, &vol, &pan, &muted, &solo);
+
+        UserChannel ch;
+        ch.name = chanName ? juce::String(chanName) : juce::String("ch" + juce::String(chanIdx));
+        ch.channelIndex = chanIdx;
+        ch.volume = vol;
+        ch.muted = muted;
+        ch.solo = solo;
+        ch.peak = clampMeter(client.GetUserChannelPeak(u, chanIdx));
+        user.channels.push_back(ch);
+      }
+
+      state.remoteUsers.push_back(std::move(user));
+    }
+  }
+
   if (!state.connected)
   {
     state.localMeter *= 0.9f;
     state.remoteMeter *= 0.9f;
+    state.sendMeter *= 0.9f;
   }
 }
 
@@ -813,7 +887,7 @@ void NinjamClientService::configureCorePaths()
 {
   auto dataRoot = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
                     .getChildFile("Nykwil")
-                    .getChildFile("NinjamVST3");
+                    .getChildFile("NinjamNext");
   dataRoot.createDirectory();
 
   auto sessionRoot = dataRoot.getChildFile("sessions");

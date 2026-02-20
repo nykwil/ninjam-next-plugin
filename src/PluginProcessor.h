@@ -3,11 +3,11 @@
 #include <JuceHeader.h>
 #include "NinjamClientService.h"
 
-class NinjamVST3AudioProcessor final : public juce::AudioProcessor
+class NinjamNextAudioProcessor final : public juce::AudioProcessor
 {
 public:
-  NinjamVST3AudioProcessor();
-  ~NinjamVST3AudioProcessor() override;
+  NinjamNextAudioProcessor();
+  ~NinjamNextAudioProcessor() override;
 
   void prepareToPlay(double sampleRate, int samplesPerBlock) override;
   void releaseResources() override;
@@ -43,6 +43,10 @@ public:
   void setMetronomeEnabled(bool enabled);
   bool getMetronomeEnabled() const;
 
+  void setUserChannelMute(int userIdx, int channelIdx, bool mute);
+  void setUserChannelSolo(int userIdx, int channelIdx, bool solo);
+  void setUserChannelVolume(int userIdx, int channelIdx, float volume);
+
   NinjamClientService& getClientService();
   const NinjamClientService& getClientService() const;
 
@@ -63,5 +67,5 @@ private:
   bool lastHostWasPlaying = false;
   bool autoConnectAttempted = false;
 
-  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NinjamVST3AudioProcessor)
+  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NinjamNextAudioProcessor)
 };

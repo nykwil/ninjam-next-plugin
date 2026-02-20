@@ -3,7 +3,7 @@
 
 #include <cmath>
 
-NinjamVST3AudioProcessor::NinjamVST3AudioProcessor()
+NinjamNextAudioProcessor::NinjamNextAudioProcessor()
   : AudioProcessor(BusesProperties().withInput("Input", juce::AudioChannelSet::stereo(), true)
                                     .withOutput("Output", juce::AudioChannelSet::stereo(), true))
 {
@@ -11,13 +11,13 @@ NinjamVST3AudioProcessor::NinjamVST3AudioProcessor()
   loadCredentialsFromSettings();
 }
 
-NinjamVST3AudioProcessor::~NinjamVST3AudioProcessor()
+NinjamNextAudioProcessor::~NinjamNextAudioProcessor()
 {
   clientService.disconnect();
   appProperties.closeFiles();
 }
 
-void NinjamVST3AudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
+void NinjamNextAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
   juce::ignoreUnused(samplesPerBlock);
   sampleRateHz = sampleRate > 1.0 ? sampleRate : 48000.0;
@@ -39,7 +39,7 @@ void NinjamVST3AudioProcessor::prepareToPlay(double sampleRate, int samplesPerBl
   }
 }
 
-void NinjamVST3AudioProcessor::releaseResources()
+void NinjamNextAudioProcessor::releaseResources()
 {
   lastHostTimeSeconds = -1.0;
   lastHostPpq = 0.0;
@@ -47,14 +47,14 @@ void NinjamVST3AudioProcessor::releaseResources()
   lastHostWasPlaying = false;
 }
 
-bool NinjamVST3AudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
+bool NinjamNextAudioProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const
 {
   const auto input = layouts.getMainInputChannelSet();
   const auto output = layouts.getMainOutputChannelSet();
   return input == output && (output == juce::AudioChannelSet::stereo() || output == juce::AudioChannelSet::mono());
 }
 
-void NinjamVST3AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
+void NinjamNextAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midiMessages)
 {
   juce::ignoreUnused(midiMessages);
 
@@ -70,7 +70,7 @@ void NinjamVST3AudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
   clientService.processAudioBlock(buffer, transportState);
 }
 
-NinjamClientService::TransportState NinjamVST3AudioProcessor::buildTransportState(int numSamples)
+NinjamClientService::TransportState NinjamNextAudioProcessor::buildTransportState(int numSamples)
 {
   NinjamClientService::TransportState state;
 
@@ -153,71 +153,71 @@ NinjamClientService::TransportState NinjamVST3AudioProcessor::buildTransportStat
   return state;
 }
 
-juce::AudioProcessorEditor* NinjamVST3AudioProcessor::createEditor()
+juce::AudioProcessorEditor* NinjamNextAudioProcessor::createEditor()
 {
-  return new NinjamVST3AudioProcessorEditor(*this);
+  return new NinjamNextAudioProcessorEditor(*this);
 }
 
-bool NinjamVST3AudioProcessor::hasEditor() const
+bool NinjamNextAudioProcessor::hasEditor() const
 {
   return true;
 }
 
-const juce::String NinjamVST3AudioProcessor::getName() const
+const juce::String NinjamNextAudioProcessor::getName() const
 {
   return JucePlugin_Name;
 }
 
-bool NinjamVST3AudioProcessor::acceptsMidi() const
+bool NinjamNextAudioProcessor::acceptsMidi() const
 {
   return false;
 }
 
-bool NinjamVST3AudioProcessor::producesMidi() const
+bool NinjamNextAudioProcessor::producesMidi() const
 {
   return false;
 }
 
-bool NinjamVST3AudioProcessor::isMidiEffect() const
+bool NinjamNextAudioProcessor::isMidiEffect() const
 {
   return false;
 }
 
-double NinjamVST3AudioProcessor::getTailLengthSeconds() const
+double NinjamNextAudioProcessor::getTailLengthSeconds() const
 {
   return 0.0;
 }
 
-int NinjamVST3AudioProcessor::getNumPrograms()
+int NinjamNextAudioProcessor::getNumPrograms()
 {
   return 1;
 }
 
-int NinjamVST3AudioProcessor::getCurrentProgram()
+int NinjamNextAudioProcessor::getCurrentProgram()
 {
   return 0;
 }
 
-void NinjamVST3AudioProcessor::setCurrentProgram(int index)
+void NinjamNextAudioProcessor::setCurrentProgram(int index)
 {
   juce::ignoreUnused(index);
 }
 
-const juce::String NinjamVST3AudioProcessor::getProgramName(int index)
+const juce::String NinjamNextAudioProcessor::getProgramName(int index)
 {
   juce::ignoreUnused(index);
   return {};
 }
 
-void NinjamVST3AudioProcessor::changeProgramName(int index, const juce::String& newName)
+void NinjamNextAudioProcessor::changeProgramName(int index, const juce::String& newName)
 {
   juce::ignoreUnused(index, newName);
 }
 
-void NinjamVST3AudioProcessor::getStateInformation(juce::MemoryBlock& destData)
+void NinjamNextAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
   const auto snapshot = clientService.getSnapshot();
-  juce::ValueTree state("NinjamVst3State");
+  juce::ValueTree state("NinjamNextState");
   state.setProperty("localGain", clientService.getLocalGain(), nullptr);
   state.setProperty("remoteGain", clientService.getRemoteGain(), nullptr);
   state.setProperty("phaseOffsetMs", clientService.getPhaseOffsetMs(), nullptr);
@@ -234,7 +234,7 @@ void NinjamVST3AudioProcessor::getStateInformation(juce::MemoryBlock& destData)
   }
 }
 
-void NinjamVST3AudioProcessor::setStateInformation(const void* data, int sizeInBytes)
+void NinjamNextAudioProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
   const auto xmlState = getXmlFromBinary(data, sizeInBytes);
   if (xmlState == nullptr)
@@ -269,70 +269,85 @@ void NinjamVST3AudioProcessor::setStateInformation(const void* data, int sizeInB
   }
 }
 
-void NinjamVST3AudioProcessor::connectToServer(const juce::String& host, const juce::String& user, const juce::String& password)
+void NinjamNextAudioProcessor::connectToServer(const juce::String& host, const juce::String& user, const juce::String& password)
 {
   autoConnectAttempted = true;
   clientService.setCredentials(host, user, password);
   clientService.connect();
 }
 
-void NinjamVST3AudioProcessor::disconnectFromServer()
+void NinjamNextAudioProcessor::disconnectFromServer()
 {
   clientService.disconnect();
 }
 
-void NinjamVST3AudioProcessor::sendUserCommand(const juce::String& commandText)
+void NinjamNextAudioProcessor::sendUserCommand(const juce::String& commandText)
 {
   clientService.sendCommand(commandText);
 }
 
-void NinjamVST3AudioProcessor::setMonitorIncomingAudio(bool enabled)
+void NinjamNextAudioProcessor::setMonitorIncomingAudio(bool enabled)
 {
   clientService.setMonitorIncomingAudio(enabled);
   saveMonitorIncomingSetting(enabled);
 }
 
-bool NinjamVST3AudioProcessor::getMonitorIncomingAudio() const
+bool NinjamNextAudioProcessor::getMonitorIncomingAudio() const
 {
   return clientService.getMonitorIncomingAudio();
 }
 
-void NinjamVST3AudioProcessor::setMonitorTxAudio(bool enabled)
+void NinjamNextAudioProcessor::setMonitorTxAudio(bool enabled)
 {
   clientService.setMonitorTxAudio(enabled);
   saveMonitorTxSetting(enabled);
 }
 
-bool NinjamVST3AudioProcessor::getMonitorTxAudio() const
+bool NinjamNextAudioProcessor::getMonitorTxAudio() const
 {
   return clientService.getMonitorTxAudio();
 }
 
-void NinjamVST3AudioProcessor::setMetronomeEnabled(bool enabled)
+void NinjamNextAudioProcessor::setMetronomeEnabled(bool enabled)
 {
   clientService.setMetronomeEnabled(enabled);
   saveMetronomeSetting(enabled);
 }
 
-bool NinjamVST3AudioProcessor::getMetronomeEnabled() const
+bool NinjamNextAudioProcessor::getMetronomeEnabled() const
 {
   return clientService.getMetronomeEnabled();
 }
 
-NinjamClientService& NinjamVST3AudioProcessor::getClientService()
+void NinjamNextAudioProcessor::setUserChannelMute(int userIdx, int channelIdx, bool mute)
+{
+  clientService.setUserChannelMute(userIdx, channelIdx, mute);
+}
+
+void NinjamNextAudioProcessor::setUserChannelSolo(int userIdx, int channelIdx, bool solo)
+{
+  clientService.setUserChannelSolo(userIdx, channelIdx, solo);
+}
+
+void NinjamNextAudioProcessor::setUserChannelVolume(int userIdx, int channelIdx, float volume)
+{
+  clientService.setUserChannelVolume(userIdx, channelIdx, volume);
+}
+
+NinjamClientService& NinjamNextAudioProcessor::getClientService()
 {
   return clientService;
 }
 
-const NinjamClientService& NinjamVST3AudioProcessor::getClientService() const
+const NinjamClientService& NinjamNextAudioProcessor::getClientService() const
 {
   return clientService;
 }
 
-void NinjamVST3AudioProcessor::initialiseSettings()
+void NinjamNextAudioProcessor::initialiseSettings()
 {
   juce::PropertiesFile::Options options;
-  options.applicationName = "NinjamVST3";
+  options.applicationName = "NinjamNext";
   options.filenameSuffix = "settings";
   options.folderName = "Nykwil";
   options.osxLibrarySubFolder = "Application Support";
@@ -341,7 +356,7 @@ void NinjamVST3AudioProcessor::initialiseSettings()
   appProperties.setStorageParameters(options);
 }
 
-void NinjamVST3AudioProcessor::loadCredentialsFromSettings()
+void NinjamNextAudioProcessor::loadCredentialsFromSettings()
 {
   if (auto* settings = appProperties.getUserSettings())
   {
@@ -351,7 +366,7 @@ void NinjamVST3AudioProcessor::loadCredentialsFromSettings()
   }
 }
 
-void NinjamVST3AudioProcessor::saveMonitorIncomingSetting(bool enabled)
+void NinjamNextAudioProcessor::saveMonitorIncomingSetting(bool enabled)
 {
   if (auto* settings = appProperties.getUserSettings())
   {
@@ -360,7 +375,7 @@ void NinjamVST3AudioProcessor::saveMonitorIncomingSetting(bool enabled)
   }
 }
 
-void NinjamVST3AudioProcessor::saveMonitorTxSetting(bool enabled)
+void NinjamNextAudioProcessor::saveMonitorTxSetting(bool enabled)
 {
   if (auto* settings = appProperties.getUserSettings())
   {
@@ -369,7 +384,7 @@ void NinjamVST3AudioProcessor::saveMonitorTxSetting(bool enabled)
   }
 }
 
-void NinjamVST3AudioProcessor::saveMetronomeSetting(bool enabled)
+void NinjamNextAudioProcessor::saveMetronomeSetting(bool enabled)
 {
   if (auto* settings = appProperties.getUserSettings())
   {
@@ -380,5 +395,5 @@ void NinjamVST3AudioProcessor::saveMetronomeSetting(bool enabled)
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-  return new NinjamVST3AudioProcessor();
+  return new NinjamNextAudioProcessor();
 }

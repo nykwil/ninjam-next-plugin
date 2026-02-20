@@ -17,6 +17,23 @@ public:
     bool hostPpqValid = false;
   };
 
+  struct UserChannel
+  {
+    juce::String name;
+    float peak = 0.0f;
+    float volume = 1.0f;
+    bool muted = false;
+    bool solo = false;
+    int channelIndex = 0;
+  };
+
+  struct RemoteUser
+  {
+    juce::String name;
+    int userIndex = 0;
+    std::vector<UserChannel> channels;
+  };
+
   struct Snapshot
   {
     bool connected = false;
@@ -26,9 +43,13 @@ public:
     juce::String password;
     int bpm = 120;
     int bpi = 16;
+    int serverBpm = 120;
+    int hostBpm = 0;
+    bool hostBpmValid = false;
     float intervalProgress = 0.0f;
     float localMeter = 0.0f;
     float remoteMeter = 0.0f;
+    float sendMeter = 0.0f;
     float localGain = 1.0f;
     float remoteGain = 1.0f;
     float phaseOffsetMs = 0.0f;
@@ -37,6 +58,7 @@ public:
     bool metronomeEnabled = true;
     juce::String syncStateText = "Classic";
     juce::StringArray logLines;
+    std::vector<RemoteUser> remoteUsers;
   };
 
   NinjamClientService();
@@ -56,6 +78,10 @@ public:
   bool getMonitorTxAudio() const;
   void setMetronomeEnabled(bool enabled);
   bool getMetronomeEnabled() const;
+
+  void setUserChannelMute(int userIdx, int channelIdx, bool mute);
+  void setUserChannelSolo(int userIdx, int channelIdx, bool solo);
+  void setUserChannelVolume(int userIdx, int channelIdx, float volume);
 
   void setLocalGain(float value);
   void setRemoteGain(float value);
