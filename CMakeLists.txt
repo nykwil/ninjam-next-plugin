@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(NinjamVST3 VERSION 0.1.0 LANGUAGES C CXX)
+project(NinjamNext VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -108,9 +108,9 @@ target_link_libraries(ninjam_core
     $<$<PLATFORM_ID:Windows>:ws2_32>
 )
 
-juce_add_plugin(NinjamVST3
+juce_add_plugin(NinjamNext
   COMPANY_NAME "Nykwil"
-  BUNDLE_ID "com.nykwil.ninjamvst3"
+  BUNDLE_ID "com.nykwil.ninjamnext"
   IS_SYNTH FALSE
   NEEDS_MIDI_INPUT FALSE
   NEEDS_MIDI_OUTPUT FALSE
@@ -118,12 +118,12 @@ juce_add_plugin(NinjamVST3
   EDITOR_WANTS_KEYBOARD_FOCUS TRUE
   COPY_PLUGIN_AFTER_BUILD FALSE
   PLUGIN_MANUFACTURER_CODE Nykw
-  PLUGIN_CODE NjV3
+  PLUGIN_CODE NjNx
   FORMATS VST3 AU
-  PRODUCT_NAME "NINJAM VST3"
+  PRODUCT_NAME "NinjamNext"
 )
 
-target_sources(NinjamVST3
+target_sources(NinjamNext
   PRIVATE
     src/NinjamClientService.cpp
     src/NinjamClientService.h
@@ -133,7 +133,7 @@ target_sources(NinjamVST3
     src/PluginProcessor.h
 )
 
-target_compile_definitions(NinjamVST3
+target_compile_definitions(NinjamNext
   PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
@@ -142,7 +142,7 @@ target_compile_definitions(NinjamVST3
     $<$<PLATFORM_ID:Windows>:_CRT_NONSTDC_NO_WARNINGS>
 )
 
-target_link_libraries(NinjamVST3
+target_link_libraries(NinjamNext
   PRIVATE
     juce::juce_audio_utils
     juce::juce_dsp
@@ -153,4 +153,4 @@ target_link_libraries(NinjamVST3
     juce::juce_recommended_warning_flags
 )
 
-juce_generate_juce_header(NinjamVST3)
+juce_generate_juce_header(NinjamNext)

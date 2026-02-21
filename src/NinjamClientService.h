@@ -6,6 +6,13 @@
 class NinjamClientService : private juce::Timer
 {
 public:
+  enum class MonitorMode
+  {
+    IncomingOnly = 0,
+    AddLocal = 1,
+    ListenLocal = 2
+  };
+
   struct TransportState
   {
     bool isPlaying = true;
@@ -17,6 +24,23 @@ public:
     bool hostPpqValid = false;
   };
 
+  struct UserChannel
+  {
+    juce::String name;
+    float peak = 0.0f;
+    float volume = 1.0f;
+    bool muted = false;
+    bool solo = false;
+    int channelIndex = 0;
+  };
+
+  struct RemoteUser
+  {
+    juce::String name;
+    int userIndex = 0;
+    std::vector<UserChannel> channels;
+  };
+
   struct Snapshot
   {
     bool connected = false;
@@ -26,17 +50,21 @@ public:
     juce::String password;
     int bpm = 120;
     int bpi = 16;
+    int serverBpm = 120;
+    int hostBpm = 0;
+    bool hostBpmValid = false;
     float intervalProgress = 0.0f;
     float localMeter = 0.0f;
     float remoteMeter = 0.0f;
+    float sendMeter = 0.0f;
     float localGain = 1.0f;
     float remoteGain = 1.0f;
     float phaseOffsetMs = 0.0f;
-    bool monitorIncomingAudio = false;
-    bool monitorTxAudio = false;
+    MonitorMode monitorMode = MonitorMode::IncomingOnly;
     bool metronomeEnabled = true;
     juce::String syncStateText = "Classic";
     juce::StringArray logLines;
+    std::vector<RemoteUser> remoteUsers;
   };
 
   NinjamClientService();
@@ -50,12 +78,14 @@ public:
   void processAudioBlock(juce::AudioBuffer<float>& buffer, const TransportState& transportState);
   void setSampleRate(int sampleRateHz);
 
-  void setMonitorIncomingAudio(bool enabled);
-  bool getMonitorIncomingAudio() const;
-  void setMonitorTxAudio(bool enabled);
-  bool getMonitorTxAudio() const;
+  void setMonitorMode(MonitorMode mode);
+  MonitorMode getMonitorMode() const;
   void setMetronomeEnabled(bool enabled);
   bool getMetronomeEnabled() const;
+
+  void setUserChannelMute(int userIdx, int channelIdx, bool mute);
+  void setUserChannelSolo(int userIdx, int channelIdx, bool solo);
+  void setUserChannelVolume(int userIdx, int channelIdx, float volume);
 
   void setLocalGain(float value);
   void setRemoteGain(float value);
@@ -104,8 +134,6 @@ private:
   bool lastHostBpmValid = false;
   bool hostLockedActive = false;
   int lastSyncMode = -1;
-  bool savedLocalMonitorMute = false;
-  bool haveSavedLocalMonitorMute = false;
   bool duplicateNameWarned = false;
   bool forceSeekPending = false;
   int lastServerBpm = 0;
