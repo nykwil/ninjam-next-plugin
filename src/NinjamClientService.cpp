@@ -8,6 +8,7 @@ namespace
 constexpr int kTimerHz = 20;
 constexpr int kMaxLogLines = 300;
 constexpr float kRemoteMeterDecay = 0.92f;
+constexpr float kGainMaxLinear = 3.1622777f; // +10 dB
 
 enum SyncMode
 {
@@ -35,9 +36,10 @@ NinjamClientService::NinjamClientService()
   client.config_savelocalaudio = 0;
   client.config_play_prebuffer = 4096;
   client.config_metronome_mute = false;
-  client.SetLocalChannelInfo(0, "Input", true, 0, true, 96, true, true);
+  client.SetLocalChannelInfo(0, "Me", true, 0, true, 96, true, true);
   applySessionChannelModeToCore();
-  client.SetLocalChannelMonitoring(0, true, 1.0f, true, 0.0f, true, false, true, false);
+  // Keep NJClient local monitor muted; plugin handles Add/Listen monitoring.
+  client.SetLocalChannelMonitoring(0, true, 1.0f, true, 0.0f, true, true, true, false);
 
   configureCorePaths();
   addLogLine("Service initialized");
@@ -174,7 +176,7 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
   float localGainValue = 1.0f;
   float remoteGainValue = 1.0f;
   float phaseOffsetMsValue = 0.0f;
-  bool monitorTxAudio = false;
+  MonitorMode monitorMode = MonitorMode::IncomingOnly;
   bool metronomeEnabled = true;
   int syncMode = syncFallbackNoClock;
   bool isPlaying = true;
@@ -189,7 +191,7 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
     localGainValue = state.localGain;
     remoteGainValue = state.remoteGain;
     phaseOffsetMsValue = state.phaseOffsetMs;
-    monitorTxAudio = state.monitorTxAudio;
+    monitorMode = state.monitorMode;
     metronomeEnabled = state.metronomeEnabled;
     roomBpi = juce::jmax(1, state.bpi);
     sessionBpm = static_cast<double>(juce::jmax(1, state.bpm));
@@ -318,7 +320,10 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
   for (int ch = 0; ch < numChannels; ++ch)
     inputScratch.copyFrom(ch, 0, buffer, ch, 0, blockSize);
 
-  if (monitorTxAudio)
+  const bool addLocalMonitor = (monitorMode == MonitorMode::AddLocal);
+  const bool monitorTxAudio = (monitorMode == MonitorMode::ListenLocal);
+
+  if (monitorTxAudio || addLocalMonitor)
   {
     if (txMonitorScratch.getNumChannels() != numChannels || txMonitorScratch.getNumSamples() != blockSize)
       txMonitorScratch.setSize(numChannels, blockSize, false, false, true);
@@ -326,11 +331,10 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
       txMonitorScratch.copyFrom(ch, 0, inputScratch, ch, 0, blockSize);
   }
 
-  inputScratch.applyGain(localGainValue);
-  if (monitorTxAudio)
+  if (monitorTxAudio || addLocalMonitor)
     txMonitorScratch.applyGain(localGainValue);
 
-  // Measure send level (post-gain input, always reflects what's being sent)
+  // Measure send level from the input feeding NJClient.
   {
     float sendPeak = 0.0f;
     for (int ch = 0; ch < numChannels; ++ch)
@@ -481,6 +485,12 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
       buffer.copyFrom(ch, 0, outputScratch, ch, 0, blockSize);
     if (remoteGainValue != 1.0f)
       buffer.applyGain(remoteGainValue);
+
+    if (addLocalMonitor)
+    {
+      for (int ch = 0; ch < numChannels; ++ch)
+        buffer.addFrom(ch, 0, txMonitorScratch, ch, 0, blockSize);
+    }
   }
 
   // ── Update meters ──
@@ -501,55 +511,25 @@ void NinjamClientService::setSampleRate(int sampleRateHz)
   sampleRate = juce::jmax(sampleRateHz, 1);
 }
 
-void NinjamClientService::setMonitorIncomingAudio(bool enabled)
+void NinjamClientService::setMonitorMode(MonitorMode mode)
 {
-  float monitorVol = 1.0f, monitorPan = 0.0f;
-  bool monitorMute = false, monitorSolo = false;
+  const juce::ScopedLock scopedLock(lock);
+  if (state.monitorMode == mode)
+    return;
 
+  state.monitorMode = mode;
+  switch (mode)
   {
-    const juce::ScopedLock scopedLock(lock);
-    if (state.monitorIncomingAudio == enabled)
-      return;
-    state.monitorIncomingAudio = enabled;
-
-    if (enabled && !haveSavedLocalMonitorMute)
-    {
-      if (client.GetLocalChannelMonitoring(0, &monitorVol, &monitorPan, &monitorMute, &monitorSolo) == 0)
-      {
-        savedLocalMonitorMute = monitorMute;
-        haveSavedLocalMonitorMute = true;
-      }
-    }
-
-    appendLogLineUnlocked(enabled ? "Incoming monitor: enabled" : "Incoming monitor: disabled");
-  }
-
-  if (enabled)
-  {
-    client.SetLocalChannelMonitoring(0, false, 0.0f, false, 0.0f, true, true, false, false);
-  }
-  else if (haveSavedLocalMonitorMute)
-  {
-    client.SetLocalChannelMonitoring(0, false, 0.0f, false, 0.0f, true, savedLocalMonitorMute, false, false);
+    case MonitorMode::IncomingOnly: appendLogLineUnlocked("Monitor mode: incoming only"); break;
+    case MonitorMode::AddLocal:     appendLogLineUnlocked("Monitor mode: add local"); break;
+    case MonitorMode::ListenLocal:  appendLogLineUnlocked("Monitor mode: listen local"); break;
   }
 }
 
-bool NinjamClientService::getMonitorIncomingAudio() const
+NinjamClientService::MonitorMode NinjamClientService::getMonitorMode() const
 {
   const juce::ScopedLock scopedLock(lock);
-  return state.monitorIncomingAudio;
-}
-
-void NinjamClientService::setMonitorTxAudio(bool enabled)
-{
-  const juce::ScopedLock scopedLock(lock);
-  state.monitorTxAudio = enabled;
-}
-
-bool NinjamClientService::getMonitorTxAudio() const
-{
-  const juce::ScopedLock scopedLock(lock);
-  return state.monitorTxAudio;
+  return state.monitorMode;
 }
 
 void NinjamClientService::setMetronomeEnabled(bool enabled)
@@ -567,13 +547,13 @@ bool NinjamClientService::getMetronomeEnabled() const
 void NinjamClientService::setLocalGain(float value)
 {
   const juce::ScopedLock scopedLock(lock);
-  state.localGain = juce::jlimit(0.0f, 2.0f, value);
+  state.localGain = juce::jlimit(0.0f, kGainMaxLinear, value);
 }
 
 void NinjamClientService::setRemoteGain(float value)
 {
   const juce::ScopedLock scopedLock(lock);
-  state.remoteGain = juce::jlimit(0.0f, 2.0f, value);
+  state.remoteGain = juce::jlimit(0.0f, kGainMaxLinear, value);
 }
 
 float NinjamClientService::getLocalGain() const
@@ -611,7 +591,7 @@ void NinjamClientService::setUserChannelSolo(int userIdx, int channelIdx, bool s
 void NinjamClientService::setUserChannelVolume(int userIdx, int channelIdx, float volume)
 {
   client.SetUserChannelState(userIdx, channelIdx,
-                             false, false, true, juce::jlimit(0.0f, 2.0f, volume),
+                             false, false, true, juce::jlimit(0.0f, kGainMaxLinear, volume),
                              false, 0.0f, false, false, false, false);
 }
 
@@ -990,7 +970,7 @@ void NinjamClientService::applySessionChannelModeToCore()
   bool broadcast = true;
 
   const char* channelNameRaw = client.GetLocalChannelInfo(0, &srcch, &bitrate, &broadcast, &outch, &flags);
-  juce::String channelName = channelNameRaw ? juce::String(channelNameRaw) : juce::String("Input");
+  juce::String channelName = channelNameRaw ? juce::String(channelNameRaw) : juce::String("Me");
 
   float monitorVol = 1.0f, monitorPan = 0.0f;
   bool monitorMute = false, monitorSolo = false;

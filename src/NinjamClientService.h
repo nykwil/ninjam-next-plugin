@@ -6,6 +6,13 @@
 class NinjamClientService : private juce::Timer
 {
 public:
+  enum class MonitorMode
+  {
+    IncomingOnly = 0,
+    AddLocal = 1,
+    ListenLocal = 2
+  };
+
   struct TransportState
   {
     bool isPlaying = true;
@@ -53,8 +60,7 @@ public:
     float localGain = 1.0f;
     float remoteGain = 1.0f;
     float phaseOffsetMs = 0.0f;
-    bool monitorIncomingAudio = false;
-    bool monitorTxAudio = false;
+    MonitorMode monitorMode = MonitorMode::IncomingOnly;
     bool metronomeEnabled = true;
     juce::String syncStateText = "Classic";
     juce::StringArray logLines;
@@ -72,10 +78,8 @@ public:
   void processAudioBlock(juce::AudioBuffer<float>& buffer, const TransportState& transportState);
   void setSampleRate(int sampleRateHz);
 
-  void setMonitorIncomingAudio(bool enabled);
-  bool getMonitorIncomingAudio() const;
-  void setMonitorTxAudio(bool enabled);
-  bool getMonitorTxAudio() const;
+  void setMonitorMode(MonitorMode mode);
+  MonitorMode getMonitorMode() const;
   void setMetronomeEnabled(bool enabled);
   bool getMetronomeEnabled() const;
 
@@ -130,8 +134,6 @@ private:
   bool lastHostBpmValid = false;
   bool hostLockedActive = false;
   int lastSyncMode = -1;
-  bool savedLocalMonitorMute = false;
-  bool haveSavedLocalMonitorMute = false;
   bool duplicateNameWarned = false;
   bool forceSeekPending = false;
   int lastServerBpm = 0;

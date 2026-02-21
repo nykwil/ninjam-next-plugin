@@ -1,5 +1,7 @@
 #include "PluginEditor.h"
 
+#include <cmath>
+
 namespace
 {
 constexpr int kPadding = 10;
@@ -8,8 +10,26 @@ constexpr int kStripHeight = 32;
 constexpr int kVuBarWidth = 140;
 constexpr int kButtonWidth = 28;
 constexpr int kUserNameWidth = 120;
-constexpr int kChannelNameWidth = 60;
-constexpr float kGainMax = 2.0f;
+constexpr float kGainMax = 3.1622777f; // +10 dB
+constexpr float kMeterFloorDb = -80.0f;
+constexpr float kGainMinDb = -80.0f;
+constexpr float kGainMaxDb = 10.0f;
+
+float meterLinearToUi(float value)
+{
+  if (value <= 0.00001f)
+    return 0.0f;
+  const float db = juce::Decibels::gainToDecibels(value, kMeterFloorDb);
+  return juce::jmap(db, kMeterFloorDb, 0.0f, 0.0f, 1.0f);
+}
+
+juce::String formatOffsetText(float value)
+{
+  const float rounded = std::round(value * 10.0f) / 10.0f;
+  if (std::abs(rounded - std::round(rounded)) < 0.001f)
+    return juce::String(static_cast<int>(std::round(rounded)));
+  return juce::String(rounded, 1);
+}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -23,7 +43,9 @@ VUGainBar::VUGainBar()
 
 void VUGainBar::setPeak(float p)
 {
-  peak = juce::jlimit(0.0f, 1.0f, p);
+  const float target = meterLinearToUi(juce::jlimit(0.0f, 1.0f, p));
+  const float smoothing = target > peak ? 0.45f : 0.20f;
+  peak += (target - peak) * smoothing;
 }
 
 void VUGainBar::setGain(float g)
@@ -34,8 +56,24 @@ void VUGainBar::setGain(float g)
 float VUGainBar::xToGain(float x) const
 {
   const float w = static_cast<float>(getWidth());
-  if (w <= 0.0f) return 1.0f;
-  return juce::jlimit(0.0f, kGainMax, (x / w) * kGainMax);
+  if (w <= 0.0f)
+    return 1.0f;
+
+  const float t = juce::jlimit(0.0f, 1.0f, x / w);
+  const float db = juce::jmap(t, kGainMinDb, kGainMaxDb);
+  return juce::jlimit(0.0f, kGainMax, juce::Decibels::decibelsToGain(db, kGainMinDb));
+}
+
+float VUGainBar::gainToX(float g) const
+{
+  const float w = static_cast<float>(getWidth());
+  if (w <= 0.0f)
+    return 0.0f;
+
+  const float clamped = juce::jlimit(0.0f, kGainMax, g);
+  const float db = juce::Decibels::gainToDecibels(clamped, kGainMinDb);
+  const float t = juce::jlimit(0.0f, 1.0f, juce::jmap(db, kGainMinDb, kGainMaxDb, 0.0f, 1.0f));
+  return t * w;
 }
 
 void VUGainBar::paint(juce::Graphics& g)
@@ -63,7 +101,7 @@ void VUGainBar::paint(juce::Graphics& g)
   }
 
   // Gain marker (vertical line)
-  const float gainX = (gain / kGainMax) * bounds.getWidth();
+  const float gainX = gainToX(gain);
   g.setColour(juce::Colours::white);
   g.drawLine(gainX, 1.0f, gainX, bounds.getHeight() - 1.0f, 2.0f);
 
@@ -72,7 +110,7 @@ void VUGainBar::paint(juce::Graphics& g)
   g.setFont(juce::FontOptions(10.0f));
   const auto dbVal = (gain > 0.001f) ? 20.0f * std::log10(gain) : -60.0f;
   juce::String gainText;
-  if (dbVal <= -59.0f)
+  if (dbVal <= (kGainMinDb + 0.5f))
     gainText = "-inf";
   else
     gainText = juce::String(dbVal, 1) + "dB";
@@ -119,11 +157,6 @@ void UserStripComponent::rebuildChannels(const NinjamClientService::RemoteUser& 
     const auto& ch = user.channels[i];
     auto* strip = channelStrips.add(new ChannelStrip());
     strip->channelIndex = ch.channelIndex;
-
-    strip->nameLabel.setText(ch.name, juce::dontSendNotification);
-    strip->nameLabel.setFont(juce::FontOptions(11.0f));
-    strip->nameLabel.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
-    addAndMakeVisible(strip->nameLabel);
 
     strip->vuGain.setPeak(ch.peak);
     strip->vuGain.setGain(ch.volume);
@@ -174,7 +207,6 @@ void UserStripComponent::update(const NinjamClientService::RemoteUser& user)
     auto* strip = channelStrips[static_cast<int>(i)];
     const auto& ch = user.channels[i];
     strip->channelIndex = ch.channelIndex;
-    strip->nameLabel.setText(ch.name, juce::dontSendNotification);
     strip->vuGain.setPeak(ch.peak);
     strip->vuGain.setGain(ch.volume);
     strip->muteButton.setToggleState(ch.muted, juce::dontSendNotification);
@@ -199,8 +231,6 @@ void UserStripComponent::resized()
   for (int i = 0; i < channelStrips.size(); ++i)
   {
     auto* strip = channelStrips[i];
-    strip->nameLabel.setBounds(x, 0, kChannelNameWidth, kStripHeight);
-    x += kChannelNameWidth;
     strip->vuGain.setBounds(x, 4, kVuBarWidth, kStripHeight - 8);
     x += kVuBarWidth + 4;
     strip->muteButton.setBounds(x, 4, kButtonWidth, kStripHeight - 8);
@@ -217,7 +247,7 @@ void UserStripComponent::resized()
 SendStripComponent::SendStripComponent(NinjamNextAudioProcessor& proc)
   : processor(proc)
 {
-  nameLabel.setText("Send", juce::dontSendNotification);
+  nameLabel.setText("Me", juce::dontSendNotification);
   nameLabel.setFont(juce::FontOptions(13.0f, juce::Font::bold));
   nameLabel.setColour(juce::Label::textColourId, juce::Colours::cyan);
   addAndMakeVisible(nameLabel);
@@ -229,43 +259,44 @@ SendStripComponent::SendStripComponent(NinjamNextAudioProcessor& proc)
   };
   addAndMakeVisible(vuGain);
 
-  // Mix: hear your input blended with remote audio (Monitor RX)
+  // Add: hear your input blended with remote audio (Monitor RX)
+  mixButton.setButtonText("A");
+  mixButton.setTooltip("Add local input to remote mix");
   mixButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::cyan.darker(0.3f));
   mixButton.setToggleable(true);
   mixButton.setClickingTogglesState(true);
-  mixButton.setToggleState(processor.getMonitorIncomingAudio(), juce::dontSendNotification);
+  const auto mode = processor.getMonitorMode();
+  mixButton.setToggleState(mode == NinjamClientService::MonitorMode::AddLocal, juce::dontSendNotification);
   mixButton.onClick = [this]
   {
-    // Mix and Solo are mutually exclusive
-    if (mixButton.getToggleState())
-      soloButton.setToggleState(false, juce::dontSendNotification);
-    processor.setMonitorTxAudio(false);
-    processor.setMonitorIncomingAudio(mixButton.getToggleState());
+    processor.setMonitorMode(mixButton.getToggleState()
+                               ? NinjamClientService::MonitorMode::AddLocal
+                               : NinjamClientService::MonitorMode::IncomingOnly);
   };
   addAndMakeVisible(mixButton);
 
-  // Solo: hear only your input, replacing remote audio (Monitor TX)
+  // Listen: hear only your input, replacing remote audio (Monitor TX)
+  soloButton.setButtonText("L");
+  soloButton.setTooltip("Listen to local input only");
   soloButton.setColour(juce::TextButton::buttonOnColourId, juce::Colours::orange);
   soloButton.setToggleable(true);
   soloButton.setClickingTogglesState(true);
-  soloButton.setToggleState(processor.getMonitorTxAudio(), juce::dontSendNotification);
+  soloButton.setToggleState(mode == NinjamClientService::MonitorMode::ListenLocal, juce::dontSendNotification);
   soloButton.onClick = [this]
   {
-    // Solo and Mix are mutually exclusive
-    if (soloButton.getToggleState())
-      mixButton.setToggleState(false, juce::dontSendNotification);
-    processor.setMonitorIncomingAudio(false);
-    processor.setMonitorTxAudio(soloButton.getToggleState());
+    processor.setMonitorMode(soloButton.getToggleState()
+                               ? NinjamClientService::MonitorMode::ListenLocal
+                               : NinjamClientService::MonitorMode::IncomingOnly);
   };
   addAndMakeVisible(soloButton);
 }
 
-void SendStripComponent::update(float sendPeak, float localGain, bool mixing, bool soloing)
+void SendStripComponent::update(float sendPeak, float localGain, NinjamClientService::MonitorMode mode)
 {
   vuGain.setPeak(sendPeak);
   vuGain.setGain(localGain);
-  mixButton.setToggleState(mixing, juce::dontSendNotification);
-  soloButton.setToggleState(soloing, juce::dontSendNotification);
+  mixButton.setToggleState(mode == NinjamClientService::MonitorMode::AddLocal, juce::dontSendNotification);
+  soloButton.setToggleState(mode == NinjamClientService::MonitorMode::ListenLocal, juce::dontSendNotification);
   repaint();
 }
 
@@ -283,11 +314,11 @@ void SendStripComponent::resized()
   int x = 4;
   nameLabel.setBounds(x, 0, kUserNameWidth - 8, kStripHeight);
   x = kUserNameWidth;
-  vuGain.setBounds(x, 4, kVuBarWidth + kChannelNameWidth, kStripHeight - 8);
-  x += kVuBarWidth + kChannelNameWidth + 4;
-  mixButton.setBounds(x, 4, 40, kStripHeight - 8);
-  x += 44;
-  soloButton.setBounds(x, 4, 44, kStripHeight - 8);
+  vuGain.setBounds(x, 4, kVuBarWidth, kStripHeight - 8);
+  x += kVuBarWidth + 4;
+  mixButton.setBounds(x, 4, kButtonWidth, kStripHeight - 8);
+  x += kButtonWidth + 2;
+  soloButton.setBounds(x, 4, kButtonWidth, kStripHeight - 8);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -298,14 +329,16 @@ MixerContentComponent::MixerContentComponent(NinjamNextAudioProcessor& proc)
   : processor(proc), sendStrip(proc)
 {
   addAndMakeVisible(sendStrip);
+  setSize(10, kStripHeight + 8);
 }
 
 void MixerContentComponent::updateFromSnapshot(const NinjamClientService::Snapshot& snapshot)
 {
-  sendStrip.update(snapshot.sendMeter, snapshot.localGain, snapshot.monitorIncomingAudio, snapshot.monitorTxAudio);
+  bool needsLayout = false;
+
+  sendStrip.update(snapshot.sendMeter, snapshot.localGain, snapshot.monitorMode);
 
   const auto& users = snapshot.remoteUsers;
-  bool needsLayout = false;
 
   // Remove strips for users no longer present
   for (int i = userStrips.size() - 1; i >= 0; --i)
@@ -313,7 +346,7 @@ void MixerContentComponent::updateFromSnapshot(const NinjamClientService::Snapsh
     bool found = false;
     for (const auto& u : users)
     {
-      if (userStrips[i]->getUserName() == u.name)
+      if (userStrips[i]->getUserIndex() == u.userIndex)
       {
         found = true;
         break;
@@ -333,7 +366,7 @@ void MixerContentComponent::updateFromSnapshot(const NinjamClientService::Snapsh
 
     for (auto* strip : userStrips)
     {
-      if (strip->getUserName() == user.name)
+      if (strip->getUserIndex() == user.userIndex)
       {
         existing = strip;
         break;
@@ -352,9 +385,11 @@ void MixerContentComponent::updateFromSnapshot(const NinjamClientService::Snapsh
     }
   }
 
-  if (needsLayout)
+  const int rows = userStrips.size() + 1;
+  const int totalHeight = rows * (kStripHeight + 4) + 4;
+
+  if (needsLayout || getHeight() != totalHeight)
   {
-    const int totalHeight = (1 + userStrips.size()) * (kStripHeight + 4) + 4;
     setSize(getWidth(), juce::jmax(10, totalHeight));
     resized();
   }
@@ -429,16 +464,13 @@ NinjamNextAudioProcessorEditor::NinjamNextAudioProcessorEditor(NinjamNextAudioPr
   metronomeToggle.onClick = [this] { metronomeChanged(); };
   addAndMakeVisible(metronomeToggle);
 
-  phaseOffsetLabel.setText("Phase Offset (ms)", juce::dontSendNotification);
+  phaseOffsetLabel.setText("Offset", juce::dontSendNotification);
   addAndMakeVisible(phaseOffsetLabel);
-  phaseOffsetSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-  phaseOffsetSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 56, 20);
-  phaseOffsetSlider.setRange(-500.0, 500.0, 1.0);
-  phaseOffsetSlider.onValueChange = [this]
-  {
-    processor.getClientService().setPhaseOffsetMs(static_cast<float>(phaseOffsetSlider.getValue()));
-  };
-  addAndMakeVisible(phaseOffsetSlider);
+  phaseOffsetEditor.setInputRestrictions(8, "-0123456789.");
+  phaseOffsetEditor.setTextToShowWhenEmpty("0", juce::Colours::grey);
+  phaseOffsetEditor.onReturnKey = [this] { phaseOffsetEdited(); };
+  phaseOffsetEditor.onFocusLost = [this] { phaseOffsetEdited(); };
+  addAndMakeVisible(phaseOffsetEditor);
 
   mixerViewport.setViewedComponent(&mixerContent, false);
   mixerViewport.setScrollBarsShown(true, false);
@@ -464,7 +496,7 @@ NinjamNextAudioProcessorEditor::NinjamNextAudioProcessorEditor(NinjamNextAudioPr
   hostEditor.setText(snapshot.host, juce::dontSendNotification);
   userEditor.setText(snapshot.user, juce::dontSendNotification);
   passwordEditor.setText(snapshot.password, juce::dontSendNotification);
-  phaseOffsetSlider.setValue(snapshot.phaseOffsetMs, juce::dontSendNotification);
+  phaseOffsetEditor.setText(formatOffsetText(snapshot.phaseOffsetMs), juce::dontSendNotification);
 
   ignoreToggleCallback = true;
   metronomeToggle.setToggleState(snapshot.metronomeEnabled, juce::dontSendNotification);
@@ -518,19 +550,15 @@ void NinjamNextAudioProcessorEditor::resized()
 
   area.removeFromTop(6);
 
-  // Info row: BPM + BPI + Interval + Metronome
+  // Info row: BPM + BPI + Interval + Metronome + Offset
   auto row3 = area.removeFromTop(kRowHeight);
-  bpmLabel.setBounds(row3.removeFromLeft(260));
-  bpiLabel.setBounds(row3.removeFromLeft(120));
-  intervalLabel.setBounds(row3.removeFromLeft(200));
-  metronomeToggle.setBounds(row3.removeFromLeft(130));
-
-  area.removeFromTop(4);
-
-  // Phase offset row
-  auto row4 = area.removeFromTop(kRowHeight);
-  phaseOffsetLabel.setBounds(row4.removeFromLeft(120));
-  phaseOffsetSlider.setBounds(row4.removeFromLeft(300));
+  bpmLabel.setBounds(row3.removeFromLeft(300));
+  bpiLabel.setBounds(row3.removeFromLeft(90));
+  intervalLabel.setBounds(row3.removeFromLeft(160));
+  metronomeToggle.setBounds(row3.removeFromLeft(110));
+  row3.removeFromLeft(8);
+  phaseOffsetLabel.setBounds(row3.removeFromLeft(46));
+  phaseOffsetEditor.setBounds(row3.removeFromLeft(70));
 
   area.removeFromTop(8);
 
@@ -589,6 +617,13 @@ void NinjamNextAudioProcessorEditor::refreshFromService()
     ignoreToggleCallback = false;
   }
 
+  if (!phaseOffsetEditor.hasKeyboardFocus(true))
+  {
+    const auto offsetText = formatOffsetText(snapshot.phaseOffsetMs);
+    if (phaseOffsetEditor.getText() != offsetText)
+      phaseOffsetEditor.setText(offsetText, juce::dontSendNotification);
+  }
+
   // Update mixer panel
   mixerContent.updateFromSnapshot(snapshot);
 
@@ -619,6 +654,14 @@ void NinjamNextAudioProcessorEditor::sendCommandPressed()
 
   processor.sendUserCommand(text);
   commandEditor.clear();
+}
+
+void NinjamNextAudioProcessorEditor::phaseOffsetEdited()
+{
+  const auto parsed = static_cast<float>(phaseOffsetEditor.getText().trim().getDoubleValue());
+  const auto clamped = juce::jlimit(-500.0f, 500.0f, parsed);
+  processor.getClientService().setPhaseOffsetMs(clamped);
+  phaseOffsetEditor.setText(formatOffsetText(clamped), juce::dontSendNotification);
 }
 
 void NinjamNextAudioProcessorEditor::metronomeChanged()

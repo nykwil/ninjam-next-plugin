@@ -36,10 +36,8 @@ public:
   void connectToServer(const juce::String& host, const juce::String& user, const juce::String& password);
   void disconnectFromServer();
   void sendUserCommand(const juce::String& commandText);
-  void setMonitorIncomingAudio(bool enabled);
-  bool getMonitorIncomingAudio() const;
-  void setMonitorTxAudio(bool enabled);
-  bool getMonitorTxAudio() const;
+  void setMonitorMode(NinjamClientService::MonitorMode mode);
+  NinjamClientService::MonitorMode getMonitorMode() const;
   void setMetronomeEnabled(bool enabled);
   bool getMetronomeEnabled() const;
 
@@ -53,8 +51,7 @@ public:
 private:
   void initialiseSettings();
   void loadCredentialsFromSettings();
-  void saveMonitorIncomingSetting(bool enabled);
-  void saveMonitorTxSetting(bool enabled);
+  void saveMonitorModeSetting(NinjamClientService::MonitorMode mode);
   void saveMetronomeSetting(bool enabled);
   NinjamClientService::TransportState buildTransportState(int numSamples);
 

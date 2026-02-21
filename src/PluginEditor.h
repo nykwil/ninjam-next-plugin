@@ -5,7 +5,7 @@
 
 // Combined VU meter + gain slider control.
 // Paints VU fill as background, gain marker as vertical line overlay.
-// Mouse drag adjusts gain (0.0 - 2.0).
+// Mouse drag adjusts gain (-inf dB to +10 dB).
 class VUGainBar : public juce::Component
 {
 public:
@@ -26,6 +26,7 @@ private:
   float gain = 1.0f;
 
   float xToGain(float x) const;
+  float gainToX(float g) const;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(VUGainBar)
 };
@@ -41,7 +42,7 @@ public:
   void paint(juce::Graphics& g) override;
   void resized() override;
 
-  juce::String getUserName() const { return userName; }
+  int getUserIndex() const { return userIdx; }
 
 private:
   NinjamNextAudioProcessor& processor;
@@ -53,7 +54,6 @@ private:
   struct ChannelStrip
   {
     int channelIndex = 0;
-    juce::Label nameLabel;
     VUGainBar vuGain;
     juce::TextButton muteButton { "M" };
     juce::TextButton soloButton { "S" };
@@ -72,7 +72,7 @@ class SendStripComponent : public juce::Component
 public:
   SendStripComponent(NinjamNextAudioProcessor& proc);
 
-  void update(float sendPeak, float localGain, bool mixing, bool soloing);
+  void update(float sendPeak, float localGain, NinjamClientService::MonitorMode mode);
   void paint(juce::Graphics& g) override;
   void resized() override;
 
@@ -81,8 +81,8 @@ private:
 
   juce::Label nameLabel;
   VUGainBar vuGain;
-  juce::TextButton mixButton { "Mix" };
-  juce::TextButton soloButton { "Solo" };
+  juce::TextButton mixButton { "A" };
+  juce::TextButton soloButton { "L" };
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SendStripComponent)
 };
@@ -121,6 +121,7 @@ private:
   void connectPressed();
   void disconnectPressed();
   void sendCommandPressed();
+  void phaseOffsetEdited();
   void metronomeChanged();
 
   NinjamNextAudioProcessor& processor;
@@ -147,7 +148,7 @@ private:
   juce::ToggleButton metronomeToggle;
 
   juce::Label phaseOffsetLabel;
-  juce::Slider phaseOffsetSlider;
+  juce::TextEditor phaseOffsetEditor;
 
   juce::Viewport mixerViewport;
   MixerContentComponent mixerContent;

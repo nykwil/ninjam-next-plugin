@@ -3,6 +3,28 @@
 
 #include <cmath>
 
+namespace
+{
+NinjamClientService::MonitorMode monitorModeFromInt(int value)
+{
+  switch (value)
+  {
+    case 1:  return NinjamClientService::MonitorMode::AddLocal;
+    case 2:  return NinjamClientService::MonitorMode::ListenLocal;
+    default: return NinjamClientService::MonitorMode::IncomingOnly;
+  }
+}
+
+NinjamClientService::MonitorMode monitorModeFromLegacyFlags(bool monitorIncomingAudio, bool monitorTxAudio)
+{
+  if (monitorTxAudio)
+    return NinjamClientService::MonitorMode::ListenLocal;
+  if (!monitorIncomingAudio)
+    return NinjamClientService::MonitorMode::AddLocal;
+  return NinjamClientService::MonitorMode::IncomingOnly;
+}
+}
+
 NinjamNextAudioProcessor::NinjamNextAudioProcessor()
   : AudioProcessor(BusesProperties().withInput("Input", juce::AudioChannelSet::stereo(), true)
                                     .withOutput("Output", juce::AudioChannelSet::stereo(), true))
@@ -224,8 +246,7 @@ void NinjamNextAudioProcessor::getStateInformation(juce::MemoryBlock& destData)
   state.setProperty("host", snapshot.host, nullptr);
   state.setProperty("user", snapshot.user, nullptr);
   state.setProperty("password", snapshot.password, nullptr);
-  state.setProperty("monitorIncomingAudio", clientService.getMonitorIncomingAudio(), nullptr);
-  state.setProperty("monitorTxAudio", clientService.getMonitorTxAudio(), nullptr);
+  state.setProperty("monitorMode", static_cast<int>(clientService.getMonitorMode()), nullptr);
   state.setProperty("metronomeEnabled", clientService.getMetronomeEnabled(), nullptr);
 
   if (auto xml = state.createXml())
@@ -257,9 +278,20 @@ void NinjamNextAudioProcessor::setStateInformation(const void* data, int sizeInB
   const auto password = state.getProperty("password", {}).toString();
   clientService.setCredentials(host, user, password);
 
-  setMonitorIncomingAudio(static_cast<bool>(state.getProperty("monitorIncomingAudio", false)));
-  setMonitorTxAudio(static_cast<bool>(state.getProperty("monitorTxAudio", false)));
-  setMetronomeEnabled(static_cast<bool>(state.getProperty("metronomeEnabled", true)));
+  const auto modeVar = state.getProperty("monitorMode", juce::var());
+  if (!modeVar.isVoid())
+  {
+    clientService.setMonitorMode(monitorModeFromInt(static_cast<int>(modeVar)));
+  }
+  else
+  {
+    const bool incomingLegacy = static_cast<bool>(state.getProperty("monitorIncomingAudio", true));
+    const bool txLegacy = static_cast<bool>(state.getProperty("monitorTxAudio", false));
+    clientService.setMonitorMode(monitorModeFromLegacyFlags(incomingLegacy, txLegacy));
+  }
+
+  clientService.setMetronomeEnabled(static_cast<bool>(
+    state.getProperty("metronomeEnabled", clientService.getMetronomeEnabled())));
 
   if (host.isNotEmpty() && user.isNotEmpty())
   {
@@ -286,26 +318,15 @@ void NinjamNextAudioProcessor::sendUserCommand(const juce::String& commandText)
   clientService.sendCommand(commandText);
 }
 
-void NinjamNextAudioProcessor::setMonitorIncomingAudio(bool enabled)
+void NinjamNextAudioProcessor::setMonitorMode(NinjamClientService::MonitorMode mode)
 {
-  clientService.setMonitorIncomingAudio(enabled);
-  saveMonitorIncomingSetting(enabled);
+  clientService.setMonitorMode(mode);
+  saveMonitorModeSetting(mode);
 }
 
-bool NinjamNextAudioProcessor::getMonitorIncomingAudio() const
+NinjamClientService::MonitorMode NinjamNextAudioProcessor::getMonitorMode() const
 {
-  return clientService.getMonitorIncomingAudio();
-}
-
-void NinjamNextAudioProcessor::setMonitorTxAudio(bool enabled)
-{
-  clientService.setMonitorTxAudio(enabled);
-  saveMonitorTxSetting(enabled);
-}
-
-bool NinjamNextAudioProcessor::getMonitorTxAudio() const
-{
-  return clientService.getMonitorTxAudio();
+  return clientService.getMonitorMode();
 }
 
 void NinjamNextAudioProcessor::setMetronomeEnabled(bool enabled)
@@ -360,26 +381,26 @@ void NinjamNextAudioProcessor::loadCredentialsFromSettings()
 {
   if (auto* settings = appProperties.getUserSettings())
   {
-    clientService.setMonitorIncomingAudio(settings->getBoolValue("monitorIncomingAudio", false));
-    clientService.setMonitorTxAudio(settings->getBoolValue("monitorTxAudio", false));
+    if (settings->containsKey("monitorMode"))
+    {
+      clientService.setMonitorMode(monitorModeFromInt(settings->getIntValue("monitorMode", 0)));
+    }
+    else
+    {
+      const bool incomingLegacy = settings->getBoolValue("monitorIncomingAudio", true);
+      const bool txLegacy = settings->getBoolValue("monitorTxAudio", false);
+      clientService.setMonitorMode(monitorModeFromLegacyFlags(incomingLegacy, txLegacy));
+    }
+
     clientService.setMetronomeEnabled(settings->getBoolValue("metronomeEnabled", true));
   }
 }
 
-void NinjamNextAudioProcessor::saveMonitorIncomingSetting(bool enabled)
+void NinjamNextAudioProcessor::saveMonitorModeSetting(NinjamClientService::MonitorMode mode)
 {
   if (auto* settings = appProperties.getUserSettings())
   {
-    settings->setValue("monitorIncomingAudio", enabled);
-    settings->saveIfNeeded();
-  }
-}
-
-void NinjamNextAudioProcessor::saveMonitorTxSetting(bool enabled)
-{
-  if (auto* settings = appProperties.getUserSettings())
-  {
-    settings->setValue("monitorTxAudio", enabled);
+    settings->setValue("monitorMode", static_cast<int>(mode));
     settings->saveIfNeeded();
   }
 }
