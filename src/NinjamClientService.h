@@ -103,7 +103,6 @@ private:
   void timerCallback() override;
   void ensureAllRemoteChannelsSubscribed();
   void warnIfDuplicateUsername();
-  void updateMetersFromBuffer(const juce::AudioBuffer<float>& buffer);
   void refreshStatusFromCore();
   void configureCorePaths();
 

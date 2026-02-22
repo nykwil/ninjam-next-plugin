@@ -16,6 +16,19 @@ enum SyncMode
   syncFallbackStopped = 1,
   syncFallbackNoClock = 2
 };
+
+float peakFromBuffer(const juce::AudioBuffer<float>& buffer, int numChannels)
+{
+  const int channelsToMeasure = juce::jmin(numChannels, buffer.getNumChannels());
+  const int numSamples = buffer.getNumSamples();
+  if (channelsToMeasure <= 0 || numSamples <= 0)
+    return 0.0f;
+
+  float peak = 0.0f;
+  for (int ch = 0; ch < channelsToMeasure; ++ch)
+    peak = juce::jmax(peak, buffer.getMagnitude(ch, 0, numSamples));
+  return peak;
+}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -334,14 +347,7 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
   if (monitorTxAudio || addLocalMonitor)
     txMonitorScratch.applyGain(localGainValue);
 
-  // Measure send level from the input feeding NJClient.
-  {
-    float sendPeak = 0.0f;
-    for (int ch = 0; ch < numChannels; ++ch)
-      sendPeak = juce::jmax(sendPeak, inputScratch.getMagnitude(ch, 0, blockSize));
-    const juce::ScopedLock scopedLock(lock);
-    state.sendMeter = clampMeter(sendPeak);
-  }
+  const float sendPeak = peakFromBuffer(inputScratch, numChannels);
 
   if (outputScratch.getNumChannels() != numChannels || outputScratch.getNumSamples() != blockSize)
     outputScratch.setSize(numChannels, blockSize, false, false, true);
@@ -494,11 +500,13 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
   }
 
   // ── Update meters ──
-  updateMetersFromBuffer(buffer);
-  const auto remote = client.GetOutputPeak();
+  const float localPeak = peakFromBuffer(buffer, numChannels);
+  const float remotePeak = client.GetOutputPeak();
   {
     const juce::ScopedLock scopedLock(lock);
-    state.remoteMeter = clampMeter(state.remoteMeter * kRemoteMeterDecay + remote * (1.0f - kRemoteMeterDecay));
+    state.sendMeter = clampMeter(sendPeak);
+    state.localMeter = clampMeter(localPeak);
+    state.remoteMeter = clampMeter(state.remoteMeter * kRemoteMeterDecay + remotePeak * (1.0f - kRemoteMeterDecay));
   }
 }
 
@@ -714,56 +722,28 @@ void NinjamClientService::refreshStatusFromCore()
   const auto bpm = juce::roundToInt(client.GetActualBPM());
   const auto bpi = client.GetBPI();
 
-  const juce::ScopedLock scopedLock(lock);
-  state.connected = (statusCode == NJClient::NJC_STATUS_OK);
-  state.statusText = statusCodeToText(statusCode);
-
-  if (bpm > 0 && lastServerBpm > 0 && bpm != lastServerBpm)
+  bool hostLocked = false;
+  bool hostBpmValid = false;
+  bool hostPpqValid = false;
+  double hostBpm = 0.0;
+  double hostPpq = 0.0;
+  int currentBpi = 16;
   {
-    forceSeekPending = true;
-    appendLogLineUnlocked("Server BPM changed to " + juce::String(bpm) + ", scheduling resync");
-  }
-  if (bpi > 0 && lastServerBpi > 0 && bpi != lastServerBpi)
-  {
-    forceSeekPending = true;
-    appendLogLineUnlocked("Server BPI changed to " + juce::String(bpi) + ", scheduling resync");
-  }
-  if (bpm > 0) lastServerBpm = bpm;
-  if (bpi > 0) lastServerBpi = bpi;
-
-  if (bpm > 0) state.serverBpm = bpm;
-  state.hostBpmValid = lastHostBpmValid;
-  state.hostBpm = lastHostBpmValid ? juce::roundToInt(lastHostBpm) : 0;
-
-  if (hostLockedActive && lastHostBpmValid)
-    state.bpm = juce::roundToInt(lastHostBpm);
-  else if (bpm > 0)
-    state.bpm = bpm;
-  if (bpi > 0) state.bpi = bpi;
-
-  if (hostLockedActive && lastHostPpqValid && state.bpi > 0)
-  {
-    const auto bpiD = static_cast<double>(state.bpi);
-    auto beatInInterval = std::fmod(lastHostPpq, bpiD);
-    if (beatInInterval < 0.0) beatInInterval += bpiD;
-    state.intervalProgress = clampMeter(static_cast<float>(beatInInterval / bpiD));
-  }
-  else
-  {
-    state.intervalProgress = clampMeter(progress);
+    const juce::ScopedLock scopedLock(lock);
+    hostLocked = hostLockedActive;
+    hostBpmValid = lastHostBpmValid;
+    hostPpqValid = lastHostPpqValid;
+    hostBpm = lastHostBpm;
+    hostPpq = lastHostPpq;
+    currentBpi = state.bpi;
   }
 
-  if (statusCode != lastStatusCode)
-  {
-    appendLogLineUnlocked("Status: " + state.statusText);
-    lastStatusCode = statusCode;
-  }
-
-  // Enumerate remote users and channels
-  state.remoteUsers.clear();
-  if (state.connected)
+  std::vector<RemoteUser> remoteUsers;
+  if (statusCode == NJClient::NJC_STATUS_OK)
   {
     const int numUsers = client.GetNumUsers();
+    remoteUsers.reserve(static_cast<size_t>(juce::jmax(0, numUsers)));
+
     for (int u = 0; u < numUsers; ++u)
     {
       const char* userName = client.GetUserState(u);
@@ -791,12 +771,60 @@ void NinjamClientService::refreshStatusFromCore()
         ch.muted = muted;
         ch.solo = solo;
         ch.peak = clampMeter(client.GetUserChannelPeak(u, chanIdx));
-        user.channels.push_back(ch);
+        user.channels.push_back(std::move(ch));
       }
 
-      state.remoteUsers.push_back(std::move(user));
+      remoteUsers.push_back(std::move(user));
     }
   }
+
+  const int hostBpmRounded = hostBpmValid ? juce::roundToInt(hostBpm) : 0;
+  const int activeBpi = (bpi > 0) ? bpi : currentBpi;
+  float intervalProgress = progress;
+  if (hostLocked && hostPpqValid && activeBpi > 0)
+  {
+    const auto bpiD = static_cast<double>(activeBpi);
+    auto beatInInterval = std::fmod(hostPpq, bpiD);
+    if (beatInInterval < 0.0)
+      beatInInterval += bpiD;
+    intervalProgress = clampMeter(static_cast<float>(beatInInterval / bpiD));
+  }
+
+  const juce::ScopedLock scopedLock(lock);
+  state.connected = (statusCode == NJClient::NJC_STATUS_OK);
+  state.statusText = statusCodeToText(statusCode);
+
+  if (bpm > 0 && lastServerBpm > 0 && bpm != lastServerBpm)
+  {
+    forceSeekPending = true;
+    appendLogLineUnlocked("Server BPM changed to " + juce::String(bpm) + ", scheduling resync");
+  }
+  if (bpi > 0 && lastServerBpi > 0 && bpi != lastServerBpi)
+  {
+    forceSeekPending = true;
+    appendLogLineUnlocked("Server BPI changed to " + juce::String(bpi) + ", scheduling resync");
+  }
+  if (bpm > 0) lastServerBpm = bpm;
+  if (bpi > 0) lastServerBpi = bpi;
+
+  if (bpm > 0) state.serverBpm = bpm;
+  state.hostBpmValid = hostBpmValid;
+  state.hostBpm = hostBpmRounded;
+
+  if (hostLocked && hostBpmValid)
+    state.bpm = hostBpmRounded;
+  else if (bpm > 0)
+    state.bpm = bpm;
+  if (bpi > 0) state.bpi = bpi;
+  state.intervalProgress = intervalProgress;
+
+  if (statusCode != lastStatusCode)
+  {
+    appendLogLineUnlocked("Status: " + state.statusText);
+    lastStatusCode = statusCode;
+  }
+
+  state.remoteUsers = std::move(remoteUsers);
 
   if (!state.connected)
   {
@@ -809,23 +837,6 @@ void NinjamClientService::refreshStatusFromCore()
 // ─────────────────────────────────────────────────────────────────────────────
 // Metering
 // ─────────────────────────────────────────────────────────────────────────────
-
-void NinjamClientService::updateMetersFromBuffer(const juce::AudioBuffer<float>& buffer)
-{
-  const auto numCh = juce::jmin(2, buffer.getNumChannels());
-  if (numCh <= 0 || buffer.getNumSamples() <= 0)
-  {
-    state.localMeter = 0.0f;
-    return;
-  }
-
-  auto peak = 0.0f;
-  for (int ch = 0; ch < numCh; ++ch)
-    peak = juce::jmax(peak, buffer.getMagnitude(ch, 0, buffer.getNumSamples()));
-
-  const juce::ScopedLock scopedLock(lock);
-  state.localMeter = clampMeter(peak);
-}
 
 float NinjamClientService::clampMeter(float value)
 {
