@@ -104,6 +104,66 @@ private:
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(MixerContentComponent)
 };
 
+struct ServerEntry
+{
+  juce::String name;
+  juce::String host;
+  juce::String port;
+  int bpm = 0;
+  int bpi = 0;
+  int userCount = 0;
+  int userLimit = 0;
+  juce::String hostPort() const { return host + ":" + port; }
+};
+
+class ServerBrowserComponent : public juce::Component,
+                               public juce::TableListBoxModel,
+                               private juce::Timer
+{
+public:
+  std::function<void(const juce::String&)> onServerSelected;
+
+  ServerBrowserComponent();
+  ~ServerBrowserComponent() override;
+
+  void paint(juce::Graphics&) override;
+  void resized() override;
+
+  int getNumRows() override;
+  void paintRowBackground(juce::Graphics&, int row, int width, int height, bool selected) override;
+  void paintCell(juce::Graphics&, int row, int columnId, int width, int height, bool selected) override;
+  void cellDoubleClicked(int row, int columnId, const juce::MouseEvent&) override;
+
+  void onFetchComplete(const juce::String& json);
+
+private:
+  class FetchThread : public juce::Thread
+  {
+  public:
+    explicit FetchThread(juce::WeakReference<ServerBrowserComponent> weakSelf);
+    ~FetchThread() override;
+    void run() override;
+  private:
+    juce::WeakReference<ServerBrowserComponent> weakSelf;
+  };
+
+  void timerCallback() override;
+  void fetchServers();
+  void selectCurrentRow();
+
+  juce::TableListBox table { {}, this };
+  juce::Label statusLabel;
+  juce::TextButton refreshButton { "Refresh" };
+  juce::TextButton selectButton { "Use Server" };
+
+  juce::Array<ServerEntry> servers;
+  std::unique_ptr<FetchThread> fetchThread;
+  bool fetching = false;
+
+  JUCE_DECLARE_WEAK_REFERENCEABLE(ServerBrowserComponent)
+  JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ServerBrowserComponent)
+};
+
 class NinjamNextAudioProcessorEditor final : public juce::AudioProcessorEditor,
                                              private juce::Timer
 {
@@ -118,6 +178,7 @@ private:
   void timerCallback() override;
 
   void refreshFromService();
+  void browsePressed();
   void connectPressed();
   void disconnectPressed();
   void sendCommandPressed();
@@ -137,6 +198,7 @@ private:
   juce::Label passwordLabel;
   juce::TextEditor passwordEditor;
 
+  juce::TextButton browseButton;
   juce::TextButton connectButton;
   juce::TextButton disconnectButton;
 
