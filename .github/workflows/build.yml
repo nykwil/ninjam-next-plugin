@@ -18,7 +18,7 @@ jobs:
         with:
           submodules: recursive
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
       - name: Build
         run: cmake --build build --config Release --target NinjamNext_VST3
       - name: Package (macOS)

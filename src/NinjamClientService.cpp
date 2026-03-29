@@ -6,7 +6,7 @@
 namespace
 {
 constexpr int kTimerHz = 20;
-constexpr int kMaxLogLines = 300;
+constexpr int kMaxLogLines = 2000;
 constexpr float kRemoteMeterDecay = 0.92f;
 constexpr float kGainMaxLinear = 3.1622777f; // +10 dB
 
@@ -107,6 +107,8 @@ void NinjamClientService::connect()
     const juce::ScopedLock scopedLock(lock);
     state.intervalProgress = 0.0f;
     state.statusText = "Connecting...";
+    state.licenseApprovalRequired = false;
+    anonymousRetryAttempted = false;
     hostPhaseAccumulatorValid = false;
     hostPhaseAccumulatorBeats = 0.0;
     lastHostPhaseBeat = 0.0;
@@ -123,10 +125,12 @@ void NinjamClientService::disconnect()
   state.statusText = statusCodeToText(NJClient::NJC_STATUS_DISCONNECTED);
   state.syncStateText = "Classic";
   state.intervalProgress = 0.0f;
+  state.licenseApprovalRequired = false;
   lastHostPpqValid = false;
   lastHostBpmValid = false;
   hostLockedActive = false;
   lastSyncMode = -1;
+  anonymousRetryAttempted = false;
   forceSeekPending = false;
   lastServerBpm = 0;
   lastServerBpi = 0;
@@ -137,6 +141,35 @@ void NinjamClientService::disconnect()
   phaseRingBeatOffset = 0.0;
   inputRingIntervalLen = 0;
   appendLogLineUnlocked("Disconnected from server");
+}
+
+void NinjamClientService::approveLicense()
+{
+  bool reconnectNow = false;
+  {
+    const juce::ScopedLock scopedLock(lock);
+    const auto host = state.host.trim();
+    const auto user = state.user.trim();
+    if (host.isEmpty() || user.isEmpty())
+    {
+      appendLogLineUnlocked("Cannot approve license: host and username are required");
+      return;
+    }
+
+    licenseApprovedHost = host;
+    licenseApprovalRequired = false;
+    state.licenseApprovalRequired = false;
+    appendLogLineUnlocked("License approved for " + host);
+
+    if (!state.connected)
+    {
+      appendLogLineUnlocked("Reconnecting...");
+      reconnectNow = true;
+    }
+  }
+
+  if (reconnectNow)
+    connect();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -184,6 +217,7 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
   const auto blockSize = buffer.getNumSamples();
   const bool hasHostClock = transportState.hostTimeSeconds >= 0.0;
   const bool hasMusicalClock = transportState.hostBpmValid && transportState.hostPpqValid;
+  const bool remoteControlChanged = remoteChannelControlChanged.exchange(false, std::memory_order_acq_rel);
 
   // ── Read shared state under lock ──
   float localGainValue = 1.0f;
@@ -198,6 +232,7 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
   int roomBpi = 16;
   double sessionBpm = 120.0;
   double rawDawPhase = -1.0;
+  int sampleRateValue = 48000;
 
   {
     const juce::ScopedLock scopedLock(lock);
@@ -208,6 +243,7 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
     metronomeEnabled = state.metronomeEnabled;
     roomBpi = juce::jmax(1, state.bpi);
     sessionBpm = static_cast<double>(juce::jmax(1, state.bpm));
+    sampleRateValue = juce::jmax(1, sampleRate);
     lastHostPpq = transportState.hostPpqPosition;
     lastHostPpqValid = transportState.hostPpqValid;
     lastHostBpm = transportState.hostBpm;
@@ -242,7 +278,7 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
       // Handles DAW PPQ wrapping at BPI boundaries by picking the
       // delta candidate (raw, +cycle, -cycle) closest to expected advance.
       const double beatsPerBlock = (static_cast<double>(blockSize) * sessionBpm) /
-                                   (60.0 * static_cast<double>(juce::jmax(sampleRate, 1)));
+                                   (60.0 * static_cast<double>(sampleRateValue));
 
       if (!hostPhaseAccumulatorValid || isSeek)
       {
@@ -305,6 +341,14 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
   // When host-locked, we mute NJClient's metronome and render our own
   // (phase-aligned to DAW beats). Otherwise let NJClient handle it.
   const bool usePhaseRing = (syncMode == syncHostLocked);
+  if (usePhaseRing && remoteControlChanged)
+  {
+    // Remote mute/solo/volume changes should be audible immediately.
+    // Invalidate calibration so output follows current server position
+    // until the next clean boundary re-calibration.
+    phaseRingOffsetValid = false;
+    phaseRingBeatOffset = 0.0;
+  }
   if (usePhaseRing)
   {
     client.config_metronome_mute = true;
@@ -371,7 +415,7 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
   if (client.GetStatus() == NJClient::NJC_STATUS_OK)
   {
     renderedByClient = true;
-    const int safeSampleRate = juce::jmax(sampleRate, 1);
+    const int safeSampleRate = juce::jmax(sampleRateValue, 1);
 
     // ── INPUT RING: remap sender audio from DAW-beat → server-position order ──
     // Ensures DAW beat 0 audio always lands at server interval position 0,
@@ -516,7 +560,25 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
 
 void NinjamClientService::setSampleRate(int sampleRateHz)
 {
-  sampleRate = juce::jmax(sampleRateHz, 1);
+  const juce::ScopedLock scopedLock(lock);
+  const int clampedRate = juce::jmax(sampleRateHz, 1);
+
+  if (sampleRate == clampedRate)
+    return;
+
+  sampleRate = clampedRate;
+  forceSeekPending = true;
+  hostPhaseAccumulatorValid = false;
+  phaseRingOffsetValid = false;
+  phaseRingBeatOffset = 0.0;
+  phaseRingIntervalLen = 0;
+  inputRingIntervalLen = 0;
+  metronomeClickState = 0;
+  phaseRingBuffer.clear();
+  inputRingBuffer.clear();
+
+  if (state.connected)
+    appendLogLineUnlocked("Sample rate changed to " + juce::String(sampleRate) + " Hz, scheduling resync");
 }
 
 void NinjamClientService::setMonitorMode(MonitorMode mode)
@@ -584,6 +646,7 @@ void NinjamClientService::setPhaseOffsetMs(float ms)
 
 void NinjamClientService::setUserChannelMute(int userIdx, int channelIdx, bool mute)
 {
+  remoteChannelControlChanged.store(true, std::memory_order_release);
   client.SetUserChannelState(userIdx, channelIdx,
                              false, false, false, 0.0f, false, 0.0f,
                              true, mute, false, false);
@@ -591,6 +654,7 @@ void NinjamClientService::setUserChannelMute(int userIdx, int channelIdx, bool m
 
 void NinjamClientService::setUserChannelSolo(int userIdx, int channelIdx, bool solo)
 {
+  remoteChannelControlChanged.store(true, std::memory_order_release);
   client.SetUserChannelState(userIdx, channelIdx,
                              false, false, false, 0.0f, false, 0.0f,
                              false, false, true, solo);
@@ -598,6 +662,7 @@ void NinjamClientService::setUserChannelSolo(int userIdx, int channelIdx, bool s
 
 void NinjamClientService::setUserChannelVolume(int userIdx, int channelIdx, float volume)
 {
+  remoteChannelControlChanged.store(true, std::memory_order_release);
   client.SetUserChannelState(userIdx, channelIdx,
                              false, false, true, juce::jlimit(0.0f, kGainMaxLinear, volume),
                              false, 0.0f, false, false, false, false);
@@ -715,6 +780,38 @@ void NinjamClientService::refreshStatusFromCore()
 {
   const auto statusCode = client.GetStatus();
 
+  bool retryAsAnonymous = false;
+  juce::String retryHost;
+  juce::String retryUser;
+  {
+    const juce::ScopedLock scopedLock(lock);
+    const auto trimmedUser = state.user.trim();
+    const bool hasUser = trimmedUser.isNotEmpty();
+    const bool alreadyAnonymous = trimmedUser.startsWithIgnoreCase("anonymous:");
+    const bool hasPassword = state.password.isNotEmpty();
+
+    if (statusCode == NJClient::NJC_STATUS_INVALIDAUTH
+        && !anonymousRetryAttempted
+        && hasUser
+        && !alreadyAnonymous
+        && !hasPassword)
+    {
+      anonymousRetryAttempted = true;
+      retryAsAnonymous = true;
+      retryHost = state.host.trim();
+      retryUser = "anonymous:" + trimmedUser;
+      state.connected = false;
+      state.statusText = "Retrying as anonymous...";
+      appendLogLineUnlocked("Auth failed; retrying as " + retryUser);
+    }
+  }
+
+  if (retryAsAnonymous)
+  {
+    client.Connect(retryHost.toRawUTF8(), retryUser.toRawUTF8(), "");
+    return;
+  }
+
   int intervalPos = 0, intervalLen = 0;
   client.GetPosition(&intervalPos, &intervalLen);
   const auto progress = intervalLen > 0 ? static_cast<float>(intervalPos) / static_cast<float>(intervalLen) : 0.0f;
@@ -793,6 +890,17 @@ void NinjamClientService::refreshStatusFromCore()
   const juce::ScopedLock scopedLock(lock);
   state.connected = (statusCode == NJClient::NJC_STATUS_OK);
   state.statusText = statusCodeToText(statusCode);
+  state.licenseApprovalRequired = licenseApprovalRequired;
+
+  if (licenseApprovalRequired && !state.connected)
+    state.statusText = "License approval required";
+
+  if (state.connected)
+  {
+    anonymousRetryAttempted = false;
+    state.licenseApprovalRequired = false;
+    licenseApprovalRequired = false;
+  }
 
   if (bpm > 0 && lastServerBpm > 0 && bpm != lastServerBpm)
   {
@@ -943,16 +1051,39 @@ void NinjamClientService::chatMessageCallback(void* userData, NJClient* inst, co
 int NinjamClientService::onLicenseAgreement(const char* licenseText)
 {
   const juce::ScopedLock scopedLock(lock);
-  appendLogLineUnlocked("Server license presented; auto-accepting");
+  const auto host = state.host.trim();
+  const bool hostIsApproved = host.isNotEmpty()
+                              && licenseApprovedHost.isNotEmpty()
+                              && host.equalsIgnoreCase(licenseApprovedHost);
+
+  appendLogLineUnlocked("License agreement from server:");
   if (licenseText != nullptr && *licenseText != 0)
   {
-    juce::String firstLine(licenseText);
-    const auto lineBreak = firstLine.indexOfChar('\n');
-    if (lineBreak > 0)
-      firstLine = firstLine.substring(0, lineBreak);
-    appendLogLineUnlocked("License: " + firstLine.trim());
+    juce::StringArray lines;
+    lines.addLines(juce::String(licenseText).replace("\r\n", "\n").replace("\r", "\n"));
+    for (const auto& line : lines)
+    {
+      const auto trimmed = line.trimEnd();
+      if (trimmed.isNotEmpty())
+        appendLogLineUnlocked("  " + trimmed);
+    }
   }
-  return 1;
+
+  if (hostIsApproved)
+  {
+    licenseApprovalRequired = false;
+    state.licenseApprovalRequired = false;
+    appendLogLineUnlocked("License approved for this host; continuing");
+    return 1;
+  }
+
+  licenseApprovalRequired = true;
+  state.licenseApprovalRequired = true;
+  state.connected = false;
+  state.statusText = "License approval required";
+  appendLogLineUnlocked("License not approved for this host");
+  appendLogLineUnlocked("Click License OK to approve and reconnect");
+  return 0;
 }
 
 int NinjamClientService::licenseAgreementCallback(void* userData, const char* licenseText)

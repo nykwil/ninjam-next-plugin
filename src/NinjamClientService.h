@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "njclient.h"
+#include <atomic>
 
 class NinjamClientService : private juce::Timer
 {
@@ -62,6 +63,7 @@ public:
     float phaseOffsetMs = 0.0f;
     MonitorMode monitorMode = MonitorMode::IncomingOnly;
     bool metronomeEnabled = true;
+    bool licenseApprovalRequired = false;
     juce::String syncStateText = "Classic";
     juce::StringArray logLines;
     std::vector<RemoteUser> remoteUsers;
@@ -73,6 +75,7 @@ public:
   void setCredentials(const juce::String& host, const juce::String& user, const juce::String& password);
   void connect();
   void disconnect();
+  void approveLicense();
 
   void sendCommand(const juce::String& text);
   void processAudioBlock(juce::AudioBuffer<float>& buffer, const TransportState& transportState);
@@ -134,6 +137,9 @@ private:
   bool hostLockedActive = false;
   int lastSyncMode = -1;
   bool duplicateNameWarned = false;
+  juce::String licenseApprovedHost;
+  bool licenseApprovalRequired = false;
+  bool anonymousRetryAttempted = false;
   bool forceSeekPending = false;
   int lastServerBpm = 0;
   int lastServerBpi = 0;
@@ -154,4 +160,5 @@ private:
   bool phaseRingOffsetValid = false;
   int metronomeClickState = 0;
   bool metronomeClickAccent = false;
+  std::atomic<bool> remoteChannelControlChanged { false };
 };

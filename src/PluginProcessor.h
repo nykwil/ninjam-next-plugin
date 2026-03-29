@@ -2,6 +2,7 @@
 
 #include <JuceHeader.h>
 #include "NinjamClientService.h"
+#include <atomic>
 
 class NinjamNextAudioProcessor final : public juce::AudioProcessor
 {
@@ -35,11 +36,13 @@ public:
 
   void connectToServer(const juce::String& host, const juce::String& user, const juce::String& password);
   void disconnectFromServer();
+  void approvePendingLicense();
   void sendUserCommand(const juce::String& commandText);
   void setMonitorMode(NinjamClientService::MonitorMode mode);
   NinjamClientService::MonitorMode getMonitorMode() const;
   void setMetronomeEnabled(bool enabled);
   bool getMetronomeEnabled() const;
+  juce::String getIntervalPositionDisplayText(float intervalProgress, int bpi) const;
 
   void setUserChannelMute(int userIdx, int channelIdx, bool mute);
   void setUserChannelSolo(int userIdx, int channelIdx, bool solo);
@@ -63,6 +66,8 @@ private:
   bool lastHostPpqValid = false;
   bool lastHostWasPlaying = false;
   bool autoConnectAttempted = false;
+  std::atomic<int> hostTimeSigNumerator { 4 };
+  std::atomic<int> hostTimeSigDenominator { 4 };
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NinjamNextAudioProcessor)
 };

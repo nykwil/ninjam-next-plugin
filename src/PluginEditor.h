@@ -120,6 +120,7 @@ private:
   void refreshFromService();
   void connectPressed();
   void disconnectPressed();
+  void licenseOkPressed();
   void sendCommandPressed();
   void phaseOffsetEdited();
   void metronomeChanged();
@@ -139,6 +140,7 @@ private:
 
   juce::TextButton connectButton;
   juce::TextButton disconnectButton;
+  juce::TextButton licenseOkButton;
 
   juce::Label statusLabel;
   juce::Label bpmLabel;

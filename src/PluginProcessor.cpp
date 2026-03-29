@@ -23,6 +23,17 @@ NinjamClientService::MonitorMode monitorModeFromLegacyFlags(bool monitorIncoming
     return NinjamClientService::MonitorMode::AddLocal;
   return NinjamClientService::MonitorMode::IncomingOnly;
 }
+
+void updateHostTimeSignature(const juce::AudioPlayHead::CurrentPositionInfo& positionInfo,
+                             std::atomic<int>& hostTimeSigNumerator,
+                             std::atomic<int>& hostTimeSigDenominator)
+{
+  const int numerator = positionInfo.timeSigNumerator > 0 ? positionInfo.timeSigNumerator : 4;
+  const int denominator = positionInfo.timeSigDenominator > 0 ? positionInfo.timeSigDenominator : 4;
+
+  hostTimeSigNumerator.store(numerator, std::memory_order_relaxed);
+  hostTimeSigDenominator.store(denominator, std::memory_order_relaxed);
+}
 }
 
 NinjamNextAudioProcessor::NinjamNextAudioProcessor()
@@ -80,6 +91,18 @@ void NinjamNextAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
 {
   juce::ignoreUnused(midiMessages);
 
+  const auto currentSampleRate = getSampleRate();
+  if (std::isfinite(currentSampleRate) && currentSampleRate > 1.0
+      && std::abs(currentSampleRate - sampleRateHz) > 1.0)
+  {
+    sampleRateHz = currentSampleRate;
+    lastHostTimeSeconds = -1.0;
+    lastHostPpq = 0.0;
+    lastHostPpqValid = false;
+    lastHostWasPlaying = false;
+    clientService.setSampleRate(juce::roundToInt(sampleRateHz));
+  }
+
   const auto totalInputChannels = getTotalNumInputChannels();
   const auto totalOutputChannels = getTotalNumOutputChannels();
 
@@ -120,6 +143,8 @@ NinjamClientService::TransportState NinjamNextAudioProcessor::buildTransportStat
     state.hostPpqValid = false;
     return state;
   }
+
+  updateHostTimeSignature(positionInfo, hostTimeSigNumerator, hostTimeSigDenominator);
 
   state.isPlaying = positionInfo.isPlaying || positionInfo.isRecording;
   state.hostBpm = positionInfo.bpm;
@@ -192,12 +217,12 @@ const juce::String NinjamNextAudioProcessor::getName() const
 
 bool NinjamNextAudioProcessor::acceptsMidi() const
 {
-  return false;
+  return true;
 }
 
 bool NinjamNextAudioProcessor::producesMidi() const
 {
-  return false;
+  return true;
 }
 
 bool NinjamNextAudioProcessor::isMidiEffect() const
@@ -313,6 +338,11 @@ void NinjamNextAudioProcessor::disconnectFromServer()
   clientService.disconnect();
 }
 
+void NinjamNextAudioProcessor::approvePendingLicense()
+{
+  clientService.approveLicense();
+}
+
 void NinjamNextAudioProcessor::sendUserCommand(const juce::String& commandText)
 {
   clientService.sendCommand(commandText);
@@ -338,6 +368,34 @@ void NinjamNextAudioProcessor::setMetronomeEnabled(bool enabled)
 bool NinjamNextAudioProcessor::getMetronomeEnabled() const
 {
   return clientService.getMetronomeEnabled();
+}
+
+juce::String NinjamNextAudioProcessor::getIntervalPositionDisplayText(float intervalProgress, int bpi) const
+{
+  const int numerator = juce::jmax(1, hostTimeSigNumerator.load(std::memory_order_relaxed));
+  const int denominator = juce::jmax(1, hostTimeSigDenominator.load(std::memory_order_relaxed));
+  const int safeBpi = juce::jmax(1, bpi);
+  const double safeProgress = juce::jlimit(0.0, 0.999999, static_cast<double>(intervalProgress));
+
+  const double quarterNotesPerBeat = 4.0 / static_cast<double>(denominator);
+  const double beatsInInterval = safeProgress * static_cast<double>(safeBpi) / quarterNotesPerBeat;
+  const double beatsPerBar = static_cast<double>(numerator);
+
+  const int bar = static_cast<int>(std::floor(beatsInInterval / beatsPerBar)) + 1;
+
+  double beatInBar = std::fmod(beatsInInterval, beatsPerBar);
+  if (beatInBar < 0.0)
+    beatInBar += beatsPerBar;
+
+  const int beat = static_cast<int>(std::floor(beatInBar)) + 1;
+  const double beatFraction = beatInBar - std::floor(beatInBar);
+
+  const int subBeatsPerBeat = juce::jmax(1, juce::roundToInt(16.0 / static_cast<double>(denominator)));
+  const int subBeat = juce::jlimit(1, subBeatsPerBeat,
+                                   static_cast<int>(std::floor(beatFraction * static_cast<double>(subBeatsPerBeat))) + 1);
+
+  return "Interval: " + juce::String(bar) + ":" + juce::String(beat) + ":" + juce::String(subBeat)
+       + " (" + juce::String(numerator) + "/" + juce::String(denominator) + ")";
 }
 
 void NinjamNextAudioProcessor::setUserChannelMute(int userIdx, int channelIdx, bool mute)

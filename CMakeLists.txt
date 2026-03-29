@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 3.22)
 
 project(NinjamNext VERSION 0.3.0 LANGUAGES C CXX)
 
+# Keep older FetchContent dependencies configurable under CMake 4.x.
+if(NOT DEFINED CMAKE_POLICY_VERSION_MINIMUM)
+  set(CMAKE_POLICY_VERSION_MINIMUM "3.5" CACHE STRING "Minimum policy version for third-party CMake projects")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -112,8 +117,8 @@ juce_add_plugin(NinjamNext
   COMPANY_NAME "Nykwil"
   BUNDLE_ID "com.nykwil.ninjamnext"
   IS_SYNTH FALSE
-  NEEDS_MIDI_INPUT FALSE
-  NEEDS_MIDI_OUTPUT FALSE
+  NEEDS_MIDI_INPUT TRUE
+  NEEDS_MIDI_OUTPUT TRUE
   IS_MIDI_EFFECT FALSE
   EDITOR_WANTS_KEYBOARD_FOCUS TRUE
   COPY_PLUGIN_AFTER_BUILD FALSE

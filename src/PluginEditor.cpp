@@ -448,6 +448,11 @@ NinjamNextAudioProcessorEditor::NinjamNextAudioProcessorEditor(NinjamNextAudioPr
   disconnectButton.onClick = [this] { disconnectPressed(); };
   addAndMakeVisible(disconnectButton);
 
+  licenseOkButton.setButtonText("License OK");
+  licenseOkButton.onClick = [this] { licenseOkPressed(); };
+  licenseOkButton.setVisible(false);
+  addAndMakeVisible(licenseOkButton);
+
   statusLabel.setText("Status: Disconnected", juce::dontSendNotification);
   addAndMakeVisible(statusLabel);
 
@@ -457,7 +462,7 @@ NinjamNextAudioProcessorEditor::NinjamNextAudioProcessorEditor(NinjamNextAudioPr
   bpiLabel.setText("BPI: --", juce::dontSendNotification);
   addAndMakeVisible(bpiLabel);
 
-  intervalLabel.setText("Interval: --", juce::dontSendNotification);
+  intervalLabel.setText("Interval: 1:1:1 (4/4)", juce::dontSendNotification);
   addAndMakeVisible(intervalLabel);
 
   metronomeToggle.setButtonText("Metronome");
@@ -545,17 +550,19 @@ void NinjamNextAudioProcessorEditor::resized()
   connectButton.setBounds(row2.removeFromLeft(110));
   row2.removeFromLeft(8);
   disconnectButton.setBounds(row2.removeFromLeft(110));
-  row2.removeFromLeft(16);
+  row2.removeFromLeft(8);
+  licenseOkButton.setBounds(row2.removeFromLeft(110));
+  row2.removeFromLeft(8);
   statusLabel.setBounds(row2);
 
   area.removeFromTop(6);
 
-  // Info row: BPM + BPI + Interval + Metronome + Offset
+  // Info row: BPM + BPI + Interval (bars:beats:subbeats) + Metronome + Offset
   auto row3 = area.removeFromTop(kRowHeight);
-  bpmLabel.setBounds(row3.removeFromLeft(300));
-  bpiLabel.setBounds(row3.removeFromLeft(90));
-  intervalLabel.setBounds(row3.removeFromLeft(160));
-  metronomeToggle.setBounds(row3.removeFromLeft(110));
+  bpmLabel.setBounds(row3.removeFromLeft(200));
+  bpiLabel.setBounds(row3.removeFromLeft(80));
+  intervalLabel.setBounds(row3.removeFromLeft(260));
+  metronomeToggle.setBounds(row3.removeFromLeft(100));
   row3.removeFromLeft(8);
   phaseOffsetLabel.setBounds(row3.removeFromLeft(46));
   phaseOffsetEditor.setBounds(row3.removeFromLeft(70));
@@ -592,6 +599,12 @@ void NinjamNextAudioProcessorEditor::refreshFromService()
 
   statusLabel.setText("Status: " + snapshot.statusText + " | Sync: " + snapshot.syncStateText, juce::dontSendNotification);
 
+  if (licenseOkButton.isVisible() != snapshot.licenseApprovalRequired)
+  {
+    licenseOkButton.setVisible(snapshot.licenseApprovalRequired);
+    resized();
+  }
+
   // Dual BPM display
   juce::String bpmText;
   bool bpmMismatch = false;
@@ -608,7 +621,8 @@ void NinjamNextAudioProcessorEditor::refreshFromService()
   bpmLabel.setColour(juce::Label::textColourId, bpmMismatch ? juce::Colours::red : juce::Colours::white);
 
   bpiLabel.setText("BPI: " + juce::String(snapshot.bpi), juce::dontSendNotification);
-  intervalLabel.setText("Interval: " + juce::String(snapshot.intervalProgress * 100.0f, 1) + "%", juce::dontSendNotification);
+  intervalLabel.setText(processor.getIntervalPositionDisplayText(snapshot.intervalProgress, snapshot.bpi),
+                        juce::dontSendNotification);
 
   if (metronomeToggle.getToggleState() != snapshot.metronomeEnabled)
   {
@@ -630,9 +644,11 @@ void NinjamNextAudioProcessorEditor::refreshFromService()
   const auto logText = snapshot.logLines.joinIntoString("\n");
   if (logText != lastRenderedLog)
   {
+    const bool followTail = !logEditor.hasKeyboardFocus(true);
     lastRenderedLog = logText;
     logEditor.setText(logText, false);
-    logEditor.moveCaretToEnd();
+    if (followTail)
+      logEditor.moveCaretToEnd();
   }
 }
 
@@ -644,6 +660,11 @@ void NinjamNextAudioProcessorEditor::connectPressed()
 void NinjamNextAudioProcessorEditor::disconnectPressed()
 {
   processor.disconnectFromServer();
+}
+
+void NinjamNextAudioProcessorEditor::licenseOkPressed()
+{
+  processor.approvePendingLicense();
 }
 
 void NinjamNextAudioProcessorEditor::sendCommandPressed()
