@@ -2,7 +2,6 @@
 
 #include <JuceHeader.h>
 #include "njclient.h"
-#include <atomic>
 
 class NinjamClientService : private juce::Timer
 {
@@ -160,5 +159,4 @@ private:
   bool phaseRingOffsetValid = false;
   int metronomeClickState = 0;
   bool metronomeClickAccent = false;
-  std::atomic<bool> remoteChannelControlChanged { false };
 };

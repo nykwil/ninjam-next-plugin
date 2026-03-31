@@ -636,33 +636,26 @@ NinjamNextAudioProcessorEditor::NinjamNextAudioProcessorEditor(NinjamNextAudioPr
   addAndMakeVisible(hostLabel);
   addAndMakeVisible(hostEditor);
 
+  browseButton.setButtonText("...");
+  browseButton.onClick = [this] { browsePressed(); };
+  addAndMakeVisible(browseButton);
+
   userLabel.setText("User", juce::dontSendNotification);
   addAndMakeVisible(userLabel);
   addAndMakeVisible(userEditor);
 
-  passwordLabel.setText("Password", juce::dontSendNotification);
+  passwordLabel.setText("Pass", juce::dontSendNotification);
   addAndMakeVisible(passwordLabel);
   passwordEditor.setPasswordCharacter('*');
   addAndMakeVisible(passwordEditor);
 
-  browseButton.setButtonText("Browse...");
-  browseButton.onClick = [this] { browsePressed(); };
-  addAndMakeVisible(browseButton);
+  connectToggleButton.setButtonText("Connect");
+  connectToggleButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(60, 60, 70));
+  connectToggleButton.onClick = [this] { connectTogglePressed(); };
+  addAndMakeVisible(connectToggleButton);
 
-  connectButton.setButtonText("Connect");
-  connectButton.onClick = [this] { connectPressed(); };
-  addAndMakeVisible(connectButton);
-
-  disconnectButton.setButtonText("Disconnect");
-  disconnectButton.onClick = [this] { disconnectPressed(); };
-  addAndMakeVisible(disconnectButton);
-
-  licenseOkButton.setButtonText("License OK");
-  licenseOkButton.onClick = [this] { licenseOkPressed(); };
-  licenseOkButton.setVisible(false);
-  addAndMakeVisible(licenseOkButton);
-
-  statusLabel.setText("Status: Disconnected", juce::dontSendNotification);
+  statusLabel.setText("Disconnected", juce::dontSendNotification);
+  statusLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
   addAndMakeVisible(statusLabel);
 
   bpmLabel.setText("BPM: --", juce::dontSendNotification);
@@ -706,6 +699,12 @@ NinjamNextAudioProcessorEditor::NinjamNextAudioProcessorEditor(NinjamNextAudioPr
   sendButton.onClick = [this] { sendCommandPressed(); };
   addAndMakeVisible(sendButton);
 
+  licenseOkButton.setButtonText("License OK");
+  licenseOkButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(140, 100, 20));
+  licenseOkButton.onClick = [this] { licenseOkPressed(); };
+  licenseOkButton.setVisible(false);
+  addAndMakeVisible(licenseOkButton);
+
   const auto snapshot = processor.getClientService().getSnapshot();
   hostEditor.setText(snapshot.host, juce::dontSendNotification);
   userEditor.setText(snapshot.user, juce::dontSendNotification);
@@ -741,42 +740,32 @@ void NinjamNextAudioProcessorEditor::resized()
   titleLabel.setBounds(area.removeFromTop(28));
   area.removeFromTop(4);
 
-  // Connection row 1: host/user/pass
+  // Connection row: Host [Browse] User Pass [Connect/Disconnect]
   auto row1 = area.removeFromTop(kRowHeight);
-  hostLabel.setBounds(row1.removeFromLeft(46));
-  hostEditor.setBounds(row1.removeFromLeft(260));
-  row1.removeFromLeft(10);
-  userLabel.setBounds(row1.removeFromLeft(36));
-  userEditor.setBounds(row1.removeFromLeft(200));
-  row1.removeFromLeft(10);
-  passwordLabel.setBounds(row1.removeFromLeft(72));
-  passwordEditor.setBounds(row1.removeFromLeft(180));
+  hostLabel.setBounds(row1.removeFromLeft(32));
+  hostEditor.setBounds(row1.removeFromLeft(180));
+  browseButton.setBounds(row1.removeFromLeft(28));
+  row1.removeFromLeft(8);
+  userLabel.setBounds(row1.removeFromLeft(30));
+  userEditor.setBounds(row1.removeFromLeft(130));
+  row1.removeFromLeft(8);
+  passwordLabel.setBounds(row1.removeFromLeft(32));
+  passwordEditor.setBounds(row1.removeFromLeft(110));
+  row1.removeFromLeft(8);
+  connectToggleButton.setBounds(row1.removeFromLeft(100));
 
   area.removeFromTop(6);
 
-  // Connection row 2: browse/connect/disconnect + status
+  // Info row: Status + BPM + BPI + Interval + Metronome + Offset
   auto row2 = area.removeFromTop(kRowHeight);
-  browseButton.setBounds(row2.removeFromLeft(90));
+  statusLabel.setBounds(row2.removeFromLeft(140));
+  bpmLabel.setBounds(row2.removeFromLeft(180));
+  bpiLabel.setBounds(row2.removeFromLeft(70));
+  intervalLabel.setBounds(row2.removeFromLeft(180));
+  metronomeToggle.setBounds(row2.removeFromLeft(100));
   row2.removeFromLeft(8);
-  connectButton.setBounds(row2.removeFromLeft(110));
-  row2.removeFromLeft(8);
-  disconnectButton.setBounds(row2.removeFromLeft(110));
-  row2.removeFromLeft(8);
-  licenseOkButton.setBounds(row2.removeFromLeft(110));
-  row2.removeFromLeft(8);
-  statusLabel.setBounds(row2);
-
-  area.removeFromTop(6);
-
-  // Info row: BPM + BPI + Interval (bars:beats:subbeats) + Metronome + Offset
-  auto row3 = area.removeFromTop(kRowHeight);
-  bpmLabel.setBounds(row3.removeFromLeft(200));
-  bpiLabel.setBounds(row3.removeFromLeft(80));
-  intervalLabel.setBounds(row3.removeFromLeft(260));
-  metronomeToggle.setBounds(row3.removeFromLeft(100));
-  row3.removeFromLeft(8);
-  phaseOffsetLabel.setBounds(row3.removeFromLeft(46));
-  phaseOffsetEditor.setBounds(row3.removeFromLeft(70));
+  phaseOffsetLabel.setBounds(row2.removeFromLeft(46));
+  phaseOffsetEditor.setBounds(row2.removeFromLeft(70));
 
   area.removeFromTop(8);
 
@@ -791,9 +780,17 @@ void NinjamNextAudioProcessorEditor::resized()
   // Log + command area
   auto logArea = area;
   auto commandArea = logArea.removeFromBottom(32);
-  commandEditor.setBounds(commandArea.removeFromLeft(commandArea.getWidth() - 90));
+  const int licenseW = licenseOkButton.isVisible() ? 90 : 0;
+  const int licenseGap = licenseOkButton.isVisible() ? 8 : 0;
+  const int rightButtons = 80 + 8 + licenseW + licenseGap;
+  commandEditor.setBounds(commandArea.removeFromLeft(commandArea.getWidth() - rightButtons));
   commandArea.removeFromLeft(8);
-  sendButton.setBounds(commandArea);
+  sendButton.setBounds(commandArea.removeFromLeft(80));
+  if (licenseOkButton.isVisible())
+  {
+    commandArea.removeFromLeft(8);
+    licenseOkButton.setBounds(commandArea);
+  }
 
   logArea.removeFromBottom(8);
   logEditor.setBounds(logArea);
@@ -808,7 +805,33 @@ void NinjamNextAudioProcessorEditor::refreshFromService()
 {
   const auto snapshot = processor.getClientService().getSnapshot();
 
-  statusLabel.setText("Status: " + snapshot.statusText + " | Sync: " + snapshot.syncStateText, juce::dontSendNotification);
+  // Update connect/disconnect toggle button
+  const bool isConnected = snapshot.connected;
+  if (isConnected != wasConnected)
+  {
+    wasConnected = isConnected;
+    if (isConnected)
+    {
+      connectToggleButton.setButtonText("Disconnect");
+      connectToggleButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(40, 120, 50));
+    }
+    else
+    {
+      connectToggleButton.setButtonText("Connect");
+      connectToggleButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromRGB(60, 60, 70));
+    }
+  }
+
+  // Status label with color
+  statusLabel.setText(snapshot.statusText, juce::dontSendNotification);
+  if (isConnected)
+    statusLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(80, 220, 100));
+  else if (snapshot.statusText.containsIgnoreCase("Connecting") || snapshot.statusText.containsIgnoreCase("Retrying"))
+    statusLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(220, 180, 50));
+  else if (snapshot.licenseApprovalRequired)
+    statusLabel.setColour(juce::Label::textColourId, juce::Colour::fromRGB(220, 150, 40));
+  else
+    statusLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
 
   if (licenseOkButton.isVisible() != snapshot.licenseApprovalRequired)
   {
@@ -863,14 +886,43 @@ void NinjamNextAudioProcessorEditor::refreshFromService()
   }
 }
 
-void NinjamNextAudioProcessorEditor::connectPressed()
+void NinjamNextAudioProcessorEditor::connectTogglePressed()
 {
+  if (wasConnected)
+  {
+    processor.disconnectFromServer();
+    return;
+  }
+
+  bool valid = true;
+  if (hostEditor.getText().trim().isEmpty())
+  {
+    flashField(hostEditor);
+    valid = false;
+  }
+  if (userEditor.getText().trim().isEmpty())
+  {
+    flashField(userEditor);
+    valid = false;
+  }
+  if (!valid)
+    return;
+
   processor.connectToServer(hostEditor.getText(), userEditor.getText(), passwordEditor.getText());
 }
 
-void NinjamNextAudioProcessorEditor::disconnectPressed()
+void NinjamNextAudioProcessorEditor::flashField(juce::TextEditor& editor)
 {
-  processor.disconnectFromServer();
+  editor.setColour(juce::TextEditor::outlineColourId, juce::Colours::red);
+  editor.repaint();
+  juce::Timer::callAfterDelay(1500, [safeEditor = juce::Component::SafePointer<juce::TextEditor>(&editor)]
+  {
+    if (auto* e = safeEditor.getComponent())
+    {
+      e->setColour(juce::TextEditor::outlineColourId, e->findColour(juce::TextEditor::focusedOutlineColourId));
+      e->repaint();
+    }
+  });
 }
 
 void NinjamNextAudioProcessorEditor::licenseOkPressed()

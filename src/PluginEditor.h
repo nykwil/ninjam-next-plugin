@@ -180,12 +180,12 @@ private:
 
   void refreshFromService();
   void browsePressed();
-  void connectPressed();
-  void disconnectPressed();
+  void connectTogglePressed();
   void licenseOkPressed();
   void sendCommandPressed();
   void phaseOffsetEdited();
   void metronomeChanged();
+  void flashField(juce::TextEditor& editor);
 
   NinjamNextAudioProcessor& processor;
 
@@ -193,6 +193,7 @@ private:
 
   juce::Label hostLabel;
   juce::TextEditor hostEditor;
+  juce::TextButton browseButton;
 
   juce::Label userLabel;
   juce::TextEditor userEditor;
@@ -200,10 +201,7 @@ private:
   juce::Label passwordLabel;
   juce::TextEditor passwordEditor;
 
-  juce::TextButton browseButton;
-  juce::TextButton connectButton;
-  juce::TextButton disconnectButton;
-  juce::TextButton licenseOkButton;
+  juce::TextButton connectToggleButton;
 
   juce::Label statusLabel;
   juce::Label bpmLabel;
@@ -221,9 +219,11 @@ private:
   juce::TextEditor logEditor;
   juce::TextEditor commandEditor;
   juce::TextButton sendButton;
+  juce::TextButton licenseOkButton;
 
   juce::String lastRenderedLog;
   bool ignoreToggleCallback = false;
+  bool wasConnected = false;
 
   JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NinjamNextAudioProcessorEditor)
 };

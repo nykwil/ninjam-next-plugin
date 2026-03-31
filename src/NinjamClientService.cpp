@@ -217,7 +217,6 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
   const auto blockSize = buffer.getNumSamples();
   const bool hasHostClock = transportState.hostTimeSeconds >= 0.0;
   const bool hasMusicalClock = transportState.hostBpmValid && transportState.hostPpqValid;
-  const bool remoteControlChanged = remoteChannelControlChanged.exchange(false, std::memory_order_acq_rel);
 
   // ── Read shared state under lock ──
   float localGainValue = 1.0f;
@@ -341,14 +340,6 @@ void NinjamClientService::processAudioBlock(juce::AudioBuffer<float>& buffer, co
   // When host-locked, we mute NJClient's metronome and render our own
   // (phase-aligned to DAW beats). Otherwise let NJClient handle it.
   const bool usePhaseRing = (syncMode == syncHostLocked);
-  if (usePhaseRing && remoteControlChanged)
-  {
-    // Remote mute/solo/volume changes should be audible immediately.
-    // Invalidate calibration so output follows current server position
-    // until the next clean boundary re-calibration.
-    phaseRingOffsetValid = false;
-    phaseRingBeatOffset = 0.0;
-  }
   if (usePhaseRing)
   {
     client.config_metronome_mute = true;
@@ -646,7 +637,6 @@ void NinjamClientService::setPhaseOffsetMs(float ms)
 
 void NinjamClientService::setUserChannelMute(int userIdx, int channelIdx, bool mute)
 {
-  remoteChannelControlChanged.store(true, std::memory_order_release);
   client.SetUserChannelState(userIdx, channelIdx,
                              false, false, false, 0.0f, false, 0.0f,
                              true, mute, false, false);
@@ -654,7 +644,6 @@ void NinjamClientService::setUserChannelMute(int userIdx, int channelIdx, bool m
 
 void NinjamClientService::setUserChannelSolo(int userIdx, int channelIdx, bool solo)
 {
-  remoteChannelControlChanged.store(true, std::memory_order_release);
   client.SetUserChannelState(userIdx, channelIdx,
                              false, false, false, 0.0f, false, 0.0f,
                              false, false, true, solo);
@@ -662,7 +651,6 @@ void NinjamClientService::setUserChannelSolo(int userIdx, int channelIdx, bool s
 
 void NinjamClientService::setUserChannelVolume(int userIdx, int channelIdx, float volume)
 {
-  remoteChannelControlChanged.store(true, std::memory_order_release);
   client.SetUserChannelState(userIdx, channelIdx,
                              false, false, true, juce::jlimit(0.0f, kGainMaxLinear, volume),
                              false, 0.0f, false, false, false, false);
