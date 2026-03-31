@@ -12,8 +12,8 @@ config="${CONFIG:-Release}"
 artefacts_dir="$build_dir/NinjamNext_artefacts/$config"
 vst3_src="$artefacts_dir/VST3/NinjamNext.vst3"
 au_src="$artefacts_dir/AU/NinjamNext.component"
-vst3_dest_dir="${VST3_DIR:-$HOME/Library/Audio/Plug-Ins/VST3}"
-au_dest_dir="${AU_DIR:-$HOME/Library/Audio/Plug-Ins/Components}"
+vst3_dest_dir="${VST3_DIR:-/Library/Audio/Plug-Ins/VST3}"
+au_dest_dir="${AU_DIR:-/Library/Audio/Plug-Ins/Components}"
 
 install_bundle() {
   local src="$1"
@@ -25,16 +25,16 @@ install_bundle() {
     return 1
   fi
 
-  mkdir -p "$dest_dir"
+  sudo mkdir -p "$dest_dir"
 
   local dest="$dest_dir/$(basename "$src")"
-  rm -rf "$dest"
-  ditto "$src" "$dest"
+  sudo rm -rf "$dest"
+  sudo cp -r "$src" "$dest"
 
-  xattr -cr "$dest" 2>/dev/null || true
+  sudo xattr -cr "$dest"
 
   if command -v codesign >/dev/null 2>&1; then
-    if ! codesign --force --deep --sign - "$dest" >/dev/null 2>&1; then
+    if ! sudo codesign --force --deep --sign - "$dest"; then
       echo "Warning: ad-hoc codesign failed for $dest." >&2
     fi
   fi
