@@ -134,7 +134,7 @@ System-wide install locations if you prefer to install for all users:
 - **VST3**: `/Library/Audio/Plug-Ins/VST3/`
 - **AU**: `/Library/Audio/Plug-Ins/Components/`
 
-### macOS Gatekeeper
+## macOS Troubleshooting
 
 The release builds are not signed or notarized, so macOS or your DAW may still block them in some cases.
 `install_mac.sh` already clears extended attributes and attempts ad-hoc signing for user-local installs.
@@ -149,6 +149,25 @@ If your DAW still does not detect the plugin, ad-hoc sign the installed bundle a
 
 ```bash
 sudo codesign --force --deep --sign - "/Library/Audio/Plug-Ins/VST3/NinjamNext.vst3"
+```
+
+**2. Ad-hoc sign the plugin:**
+
+On newer macOS versions, unsigned plugins may be silently ignored by DAWs even after removing quarantine. Ad-hoc signing fixes this:
+
+```bash
+codesign --force --deep --sign - "/Library/Audio/Plug-Ins/VST3/NINJAM VST3.vst3"
+```
+
+After both steps, rescan plugins in your DAW.
+
+**3. Verify (optional):**
+
+If the plugin still doesn't appear, check that macOS isn't rejecting it:
+
+```bash
+codesign -v "/Library/Audio/Plug-Ins/VST3/NINJAM VST3.vst3"
+spctl --assess --type exec "/Library/Audio/Plug-Ins/VST3/NINJAM VST3.vst3"
 ```
 
 ## Local Test Server

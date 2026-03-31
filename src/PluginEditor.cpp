@@ -413,6 +413,211 @@ void MixerContentComponent::resized()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ServerBrowserComponent
+// ─────────────────────────────────────────────────────────────────────────────
+
+ServerBrowserComponent::FetchThread::FetchThread(juce::WeakReference<ServerBrowserComponent> ws)
+  : juce::Thread("NinjamServerFetch"), weakSelf(ws)
+{
+  startThread();
+}
+
+ServerBrowserComponent::FetchThread::~FetchThread()
+{
+  stopThread(4000);
+}
+
+void ServerBrowserComponent::FetchThread::run()
+{
+  juce::URL url("http://ninbot.com/app/servers.php");
+  auto opts = juce::URL::InputStreamOptions(juce::URL::ParameterHandling::inAddress)
+                  .withConnectionTimeoutMs(8000)
+                  .withNumRedirectsToFollow(3);
+  juce::String result;
+  if (!threadShouldExit())
+    if (auto stream = url.createInputStream(opts))
+      result = stream->readEntireStreamAsString();
+
+  auto ws = weakSelf;
+  juce::MessageManager::callAsync([ws, result]
+  {
+    if (auto* self = ws.get())
+      self->onFetchComplete(result);
+  });
+}
+
+ServerBrowserComponent::ServerBrowserComponent()
+{
+  table.getHeader().addColumn("Server",   1, 220, 100, -1, juce::TableHeaderComponent::notSortable);
+  table.getHeader().addColumn("BPM",      2, 55,  40,  -1, juce::TableHeaderComponent::notSortable);
+  table.getHeader().addColumn("BPI",      3, 55,  40,  -1, juce::TableHeaderComponent::notSortable);
+  table.getHeader().addColumn("Users",    4, 80,  60,  -1, juce::TableHeaderComponent::notSortable);
+  table.setMultipleSelectionEnabled(false);
+  table.setColour(juce::ListBox::backgroundColourId, juce::Colour::fromRGB(30, 32, 36));
+  addAndMakeVisible(table);
+
+  statusLabel.setText("", juce::dontSendNotification);
+  statusLabel.setColour(juce::Label::textColourId, juce::Colours::grey);
+  statusLabel.setFont(juce::FontOptions(12.0f));
+  addAndMakeVisible(statusLabel);
+
+  refreshButton.onClick = [this] { fetchServers(); };
+  addAndMakeVisible(refreshButton);
+
+  selectButton.onClick = [this] { selectCurrentRow(); };
+  addAndMakeVisible(selectButton);
+
+  fetchServers();
+  startTimerHz(1); // counts down to next auto-refresh
+}
+
+ServerBrowserComponent::~ServerBrowserComponent()
+{
+  stopTimer();
+  fetchThread.reset(); // blocks until thread exits
+}
+
+void ServerBrowserComponent::paint(juce::Graphics& g)
+{
+  g.fillAll(juce::Colour::fromRGB(24, 26, 30));
+}
+
+void ServerBrowserComponent::resized()
+{
+  auto area = getLocalBounds().reduced(8);
+  auto bottomRow = area.removeFromBottom(28);
+  selectButton.setBounds(bottomRow.removeFromRight(90));
+  bottomRow.removeFromRight(6);
+  refreshButton.setBounds(bottomRow.removeFromRight(80));
+  bottomRow.removeFromRight(8);
+  statusLabel.setBounds(bottomRow);
+  area.removeFromBottom(6);
+  table.setBounds(area);
+}
+
+int ServerBrowserComponent::getNumRows()
+{
+  return servers.size();
+}
+
+void ServerBrowserComponent::paintRowBackground(juce::Graphics& g, int row, int width, int height, bool selected)
+{
+  if (selected)
+    g.fillAll(juce::Colour::fromRGB(60, 90, 120));
+  else if (row % 2 == 0)
+    g.fillAll(juce::Colour::fromRGB(34, 36, 42));
+  else
+    g.fillAll(juce::Colour::fromRGB(28, 30, 36));
+}
+
+void ServerBrowserComponent::paintCell(juce::Graphics& g, int row, int columnId, int width, int height, bool /*selected*/)
+{
+  if (row < 0 || row >= servers.size())
+    return;
+
+  const auto& s = servers.getReference(row);
+  juce::String text;
+  switch (columnId)
+  {
+    case 1: text = s.name; break;
+    case 2: text = juce::String(s.bpm); break;
+    case 3: text = juce::String(s.bpi); break;
+    case 4: text = juce::String(s.userCount) + "/" + juce::String(s.userLimit); break;
+    default: break;
+  }
+
+  g.setColour(juce::Colours::white);
+  g.setFont(juce::FontOptions(13.0f));
+  g.drawText(text, 4, 0, width - 8, height, juce::Justification::centredLeft, true);
+}
+
+void ServerBrowserComponent::cellDoubleClicked(int row, int /*columnId*/, const juce::MouseEvent&)
+{
+  if (row >= 0 && row < servers.size())
+  {
+    if (onServerSelected)
+      onServerSelected(servers.getReference(row).hostPort());
+    if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+      dw->exitModalState(0);
+  }
+}
+
+void ServerBrowserComponent::selectCurrentRow()
+{
+  const int row = table.getSelectedRow();
+  if (row >= 0 && row < servers.size())
+  {
+    if (onServerSelected)
+      onServerSelected(servers.getReference(row).hostPort());
+    if (auto* dw = findParentComponentOfClass<juce::DialogWindow>())
+      dw->exitModalState(0);
+  }
+}
+
+void ServerBrowserComponent::timerCallback()
+{
+  if (--ticksUntilRefresh <= 0)
+  {
+    ticksUntilRefresh = 30;
+    fetchServers();
+  }
+}
+
+void ServerBrowserComponent::fetchServers()
+{
+  if (fetching)
+    return;
+  fetching = true;
+  statusLabel.setText("Fetching...", juce::dontSendNotification);
+  fetchThread = std::make_unique<FetchThread>(juce::WeakReference<ServerBrowserComponent>(this));
+}
+
+void ServerBrowserComponent::onFetchComplete(const juce::String& json)
+{
+  fetching = false;
+  fetchThread.reset();
+
+  juce::Array<ServerEntry> newServers;
+  auto parsed = juce::JSON::parse(json);
+  if (auto* obj = parsed.getDynamicObject())
+  {
+    if (auto* arr = obj->getProperty("servers").getArray())
+    {
+      for (const auto& item : *arr)
+      {
+        if (auto* s = item.getDynamicObject())
+        {
+          ServerEntry entry;
+          entry.name      = s->getProperty("name").toString();
+          entry.host      = s->getProperty("host").toString();
+          entry.port      = s->getProperty("port").toString();
+          entry.bpm       = s->getProperty("bpm").toString().getIntValue();
+          entry.bpi       = s->getProperty("bpi").toString().getIntValue();
+          entry.userCount = s->getProperty("user_count").toString().getIntValue();
+          entry.userLimit = s->getProperty("user_limit").toString().getIntValue();
+          if (entry.host.isNotEmpty() && entry.port.isNotEmpty())
+            newServers.add(entry);
+        }
+      }
+    }
+  }
+
+  std::sort(newServers.begin(), newServers.end(), [](const ServerEntry& a, const ServerEntry& b) {
+    return a.userCount > b.userCount;
+  });
+
+  servers = std::move(newServers);
+  table.updateContent();
+
+  if (json.isEmpty())
+    statusLabel.setText("Error: could not reach server list", juce::dontSendNotification);
+  else
+    statusLabel.setText("Updated " + juce::Time::getCurrentTime().formatted("%H:%M:%S")
+                        + "  (double-click or Use Server to connect)",
+                        juce::dontSendNotification);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // NinjamNextAudioProcessorEditor
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -439,6 +644,10 @@ NinjamNextAudioProcessorEditor::NinjamNextAudioProcessorEditor(NinjamNextAudioPr
   addAndMakeVisible(passwordLabel);
   passwordEditor.setPasswordCharacter('*');
   addAndMakeVisible(passwordEditor);
+
+  browseButton.setButtonText("Browse...");
+  browseButton.onClick = [this] { browsePressed(); };
+  addAndMakeVisible(browseButton);
 
   connectButton.setButtonText("Connect");
   connectButton.onClick = [this] { connectPressed(); };
@@ -545,8 +754,10 @@ void NinjamNextAudioProcessorEditor::resized()
 
   area.removeFromTop(6);
 
-  // Connection row 2: connect/disconnect + status
+  // Connection row 2: browse/connect/disconnect + status
   auto row2 = area.removeFromTop(kRowHeight);
+  browseButton.setBounds(row2.removeFromLeft(90));
+  row2.removeFromLeft(8);
   connectButton.setBounds(row2.removeFromLeft(110));
   row2.removeFromLeft(8);
   disconnectButton.setBounds(row2.removeFromLeft(110));
@@ -691,4 +902,22 @@ void NinjamNextAudioProcessorEditor::metronomeChanged()
     return;
 
   processor.setMetronomeEnabled(metronomeToggle.getToggleState());
+}
+
+void NinjamNextAudioProcessorEditor::browsePressed()
+{
+  auto* content = new ServerBrowserComponent();
+  content->setSize(520, 380);
+  content->onServerSelected = [this](const juce::String& hostPort)
+  {
+    hostEditor.setText(hostPort, juce::dontSendNotification);
+  };
+
+  juce::DialogWindow::LaunchOptions opts;
+  opts.content.setOwned(content);
+  opts.dialogTitle = "Browse Public Servers";
+  opts.dialogBackgroundColour = juce::Colour::fromRGB(24, 26, 30);
+  opts.useNativeTitleBar = false;
+  opts.resizable = false;
+  opts.launchAsync();
 }
